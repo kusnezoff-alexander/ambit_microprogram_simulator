@@ -115,7 +115,8 @@
         }
         
         function parseProgram(text) {
-            const lines = text.trim().split('\n');
+            // Handle both Unix (\n) and Windows (\r\n) line endings
+            const lines = text.trim().split(/\r?\n/);
             const instrs = [];
             const inputs = new Set();
             const outputs = new Set();
@@ -145,7 +146,10 @@
                             current += ch;
                         }
                     }
-                    if (current) args.push(current);
+                    // Strip any trailing \r from Windows line endings
+                    if (current) {
+                        args.push(current.replace(/\r$/, ''));
+                    }
                     
                     instrs.push({type: m[1], args: args});
                     for (const a of args) {
