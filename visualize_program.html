@@ -274,9 +274,16 @@
             const totalRows = allRegNames.length;
             
             // Build list of rows to display:
-            // All activated rows + a few rows of context around each
+            // Always show output rows + activated rows with context
             const CONTEXT = 2;  // Show 2 rows above/below each activated row
             const rowIndicesToShow = new Set();
+            
+            // Always show all output rows
+            for (let i = 0; i < totalRows; i++) {
+                if (allRegNames[i].startsWith('O')) {
+                    rowIndicesToShow.add(i);
+                }
+            }
             
             if (activatedRows.size === 0 || totalRows <= MAX_VISIBLE_ROWS) {
                 // No active instruction or small program: show windowed view
@@ -545,36 +552,9 @@
         }
         
         function jumpTo(n) {
-            // Reload and step to n
-            const name = document.getElementById('program').value;
-            const inputData = parseInput(document.getElementById('inputVal').value);
-            if (!program) return;
-            
-            pc = 0;
-            bitWidth = name.startsWith('abs') ? parseInt(name.slice(3)) : parseInt(name.slice(8));
-            const numCols = 8;
-            
-            registers = {};
-            const inputArray = Array.isArray(inputData) ? inputData : [inputData];
-            
-            // Re-initialize with packed layout
-            for (let bitPos = 0; bitPos < bitWidth; bitPos++) {
-                const rowName = 'I' + bitPos;
-                registers[rowName] = new Array(numCols).fill(0);
-                for (let col = 0; col < inputArray.length && col < numCols; col++) {
-                    const val = inputArray[col] || 0;
-                    registers[rowName][col] = (val >> bitPos) & 1;
-                }
-            }
-
-            for (let bitPos = 0; bitPos < bitWidth; bitPos++) {
-                const rowName = 'O' + bitPos;
-                registers[rowName] = new Array(numCols).fill(null);
-            }
-
-            registers['C0'] = new Array(numCols).fill(0);
-            registers['C1'] = new Array(numCols).fill(1);
-            
+            // Reload and step to n - reuse loadProgram's initialization
+            loadProgram();
+            // Now step forward to n
             while (pc < n) stepInstruction();
 
             // Set activated rows for the instruction at position n
