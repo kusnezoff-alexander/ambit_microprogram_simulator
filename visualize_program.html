@@ -461,49 +461,51 @@
             const numCols = 8;  // Fixed: 8 columns for parallel computations
             
             if (instr.type === 'AAP') {
-                // AAP can be:
-                // AAP src dest (copy)
-                // AAP [T0,T1,T2] dest (MAJ3 to dest)
-                // AAP src [T0,T1,T2] (MAJ3 with src as one input)
+                // AAP semantics from AMBIT:
+                // AAP src dest          -> copy src to dest
+                // AAP [T0,T1,T2] dest   -> MAJ3(T0,T1,T2) written to dest
+                // AAP src [T0,T1,T2]    -> copy src to all of T0,T1,T2 (multi-row copy)
+                // AAP [T0,T1,T2] ~DCC0  -> MAJ3 written to ~DCC0
                 
-                let dest = null;
-                let majorityArgs = [];
-                let srcArg = null;
+                let bracketedArgs = [];
+                let nonBracketedArgs = [];
+                let bracketedIdx = -1;
                 
-                // Find bracketed args and destination
                 for (let i = 0; i < instr.args.length; i++) {
                     const arg = instr.args[i];
                     if (arg.startsWith('[') && arg.endsWith(']')) {
-                        majorityArgs = arg.slice(1,-1).split(',').map(s=>s.trim());
-                    } else if (!dest) {
-                        // First non-bracketed could be source or dest
-                        if (i === instr.args.length - 1) {
-                            dest = arg;  // Last arg is destination
-                        } else {
-                            srcArg = arg;  // Not last, so it's a source
-                        }
+                        bracketedArgs = arg.slice(1,-1).split(',').map(s=>s.trim());
+                        bracketedIdx = i;
+                    } else {
+                        nonBracketedArgs.push({ arg, idx: i });
                     }
                 }
                 
                 // Execute for each column
                 for (let c = 0; c < numCols; c++) {
-                    let result;
-                    if (majorityArgs.length >= 3) {
-                        // MAJ3 operation
-                        const a = getReg(majorityArgs[0], c);
-                        const b = getReg(majorityArgs[1], c);
-                        const cc = getReg(majorityArgs[2], c);
-                        result = (a & b) | (a & cc) | (b & cc);
-                    } else if (srcArg) {
-                        // Simple copy
-                        result = getReg(srcArg, c);
-                    } else {
-                        result = 0;
+                    if (bracketedArgs.length >= 3 && nonBracketedArgs.length >= 1) {
+                        // MAJ3 with destination: AAP [T0,T1,T2] dest
+                        const a = getReg(bracketedArgs[0], c);
+                        const b = getReg(bracketedArgs[1], c);
+                        const cc = getReg(bracketedArgs[2], c);
+                        const result = (a & b) | (a & cc) | (b & cc);
+                        // Dest is the non-bracketed arg
+                        const dest = nonBracketedArgs[nonBracketedArgs.length - 1].arg;
+                        setReg(dest, c, result);
+                    } else if (bracketedArgs.length > 0 && bracketedArgs.length < 3 && nonBracketedArgs.length >= 1) {
+                        // Multi-row copy: AAP src [T2, T3] -> copy src to T2 and T3
+                        const src = nonBracketedArgs[0].arg;
+                        const val = getReg(src, c);
+                        for (const dest of bracketedArgs) {
+                            setReg(dest, c, val);
+                        }
+                    } else if (bracketedArgs.length === 0 && nonBracketedArgs.length === 2) {
+                        // Simple copy: AAP src dest
+                        const src = nonBracketedArgs[0].arg;
+                        const dest = nonBracketedArgs[1].arg;
+                        setReg(dest, c, getReg(src, c));
                     }
-                    
-                    if (dest) setReg(dest, c, result);
                 }
-
             }
             
             pc++;
