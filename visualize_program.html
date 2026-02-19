@@ -104,13 +104,14 @@
                 }
             }
             console.log('Init complete. Programs:', Object.keys(programs));
-            // Debug: log the first program's parsed structure
+            // Debug: Check first few instructions of abs4
             if (programs['abs4']) {
-                console.log('abs4 program:', programs['abs4']);
-                console.log('abs4 outputs count:', programs['abs4'].outputs);
-                // Debug: Check specific instructions
-                const instr15 = programs['abs4'].instrs[14];  // 0-indexed, so 14 is line 15
-                console.log('Instruction 15:', instr15);
+                console.log('abs4 first 5 instructions:');
+                for (let i = 0; i < Math.min(5, programs['abs4'].instrs.length); i++) {
+                    const instr = programs['abs4'].instrs[i];
+                    const rows = getActivatedRows(instr);
+                    console.log(`  ${i}: ${instr.type} ${instr.args.join(' ')} -> rows: [${Array.from(rows).join(', ')}]`);
+                }
             }
         }
         
@@ -120,8 +121,10 @@
             const instrs = [];
             const inputs = new Set();
             const outputs = new Set();
-            for (const line of lines) {
+            for (let line of lines) {
                 if (!line.trim()) continue;
+                // Strip any trailing \r from Windows line endings
+                line = line.replace(/\r$/, '');
                 const m = line.match(/^(AAP|AP)\s+(.*)$/);
                 if (m) {
                     // Parse args handling bracketed expressions like [T0, T1, T2]
@@ -146,10 +149,7 @@
                             current += ch;
                         }
                     }
-                    // Strip any trailing \r from Windows line endings
-                    if (current) {
-                        args.push(current.replace(/\r$/, ''));
-                    }
+                    if (current) args.push(current);
                     
                     instrs.push({type: m[1], args: args});
                     for (const a of args) {
@@ -602,11 +602,6 @@
         function getActivatedRows(instr) {
             const rows = new Set();
             if (!instr) return rows;
-
-            // DEBUG: Log the instruction being processed
-            if (instr.args.some(a => a.includes('S2') || a.includes('S10'))) {
-                console.log('getActivatedRows called with:', instr);
-            }
 
             for (let i = 0; i < instr.args.length; i++) {
                 const arg = instr.args[i];
