@@ -431,66 +431,79 @@
             updateStats();
             
             // Render result - reconstruct from packed vertical layout
-            // Each column has an output value, combine bit rows for each column
+            // Read output values from all O* rows in registers
+            const outputRowNames = Object.keys(registers)
+                .filter(r => r.startsWith('O'))
+                .sort((a, b) => parseInt(a.slice(1)) - parseInt(b.slice(1)));
+            const numOutputBits = outputRowNames.length;
+            
             let outputVals = [];
+            let anyOutputSet = false;
             for (let col = 0; col < numCols; col++) {
                 let outVal = 0;
-                for (let bitPos = 0; bitPos < bitWidth; bitPos++) {
-                    const rowName = 'O' + bitPos;
-                    const vals = registers[rowName];
-                    if (vals && vals[col] === 1) {
-                        outVal |= (1 << bitPos);
+                let allNull = true;
+                for (let bitPos = 0; bitPos < numOutputBits; bitPos++) {
+                    const vals = registers[outputRowNames[bitPos]];
+                    if (vals && vals[col] !== null) {
+                        allNull = false;
+                        if (vals[col] === 1) {
+                            outVal |= (1 << bitPos);
+                        }
                     }
                 }
-                outputVals.push(outVal);
+                if (!allNull) anyOutputSet = true;
+                outputVals.push(allNull ? null : outVal);
             }
             
             const inputData = parseInput(document.getElementById('inputVal').value);
             const isArrayInput = Array.isArray(inputData);
+            const inputArray = isArrayInput ? inputData : [inputData];
             const inputDisplay = isArrayInput ? '[' + inputData.join(',') + ']' : inputData;
+            
+            // Format output display - only show as many columns as there are inputs
+            const numInputs = inputArray.length;
+            const displayOutputs = outputVals.slice(0, numInputs);
+            const outputDisplay = displayOutputs.map(v => v === null ? '?' : v);
             
             let expected = 'N/A';
             let correct = false;
+            const isDone = pc >= program.instrs.length;
 
-            if (isArrayInput && pc >= program.instrs.length) {
-                // For array input, check all outputs
-                if (document.getElementById('program').value.startsWith('abs')) {
+            if (isDone) {
+                const progName = document.getElementById('program').value;
+                if (progName.startsWith('abs')) {
                     const maxSigned = 1 << (bitWidth - 1);
                     const mask = (1 << bitWidth) - 1;
                     let allCorrect = true;
                     expected = [];
-                    for (let i = 0; i < inputArray.length; i++) {
+                    for (let i = 0; i < numInputs; i++) {
                         const val = inputArray[i];
                         const signed = val >= maxSigned ? val - (1 << bitWidth) : val;
                         const exp = Math.abs(signed) & mask;
                         expected.push(exp);
-                        if (outputVals[i] !== exp) allCorrect = false;
+                        if (displayOutputs[i] !== exp) allCorrect = false;
+                    }
+                    correct = allCorrect;
+                } else if (progName.startsWith('bitcount')) {
+                    let allCorrect = true;
+                    expected = [];
+                    for (let i = 0; i < numInputs; i++) {
+                        const exp = inputArray[i].toString(2).split('1').length - 1;
+                        expected.push(exp);
+                        if (displayOutputs[i] !== exp) allCorrect = false;
                     }
                     correct = allCorrect;
                 }
-            } else if (!isArrayInput && pc >= program.instrs.length) {
-                if (document.getElementById('program').value.startsWith('abs')) {
-                    const maxSigned = 1 << (bitWidth - 1);
-                    const signed = inputData >= maxSigned ? inputData - (1 << bitWidth) : inputData;
-                    expected = Math.abs(signed) & ((1 << bitWidth) - 1);
-                    correct = outputVals[0] === expected;
-                } else {
-                    expected = inputData.toString(2).split('1').length - 1;
-                    correct = outputVals[0] === expected;
-                }
             }
             
-            const isDone = pc >= program.instrs.length;
             let resultHtml = `Input: ${inputDisplay} (${bitWidth}-bit)<br>`;
-            resultHtml += `Output: [${outputVals.join(', ')}]<br>`;
-            if (!isArrayInput) {
-                resultHtml += `Expected: ${expected}`;
-            }
-            if (isDone && !isArrayInput) {
+            resultHtml += `Output: [${outputDisplay.join(', ')}]<br>`;
+            if (isDone) {
+                resultHtml += `Expected: [${Array.isArray(expected) ? expected.join(', ') : expected}]`;
                 if (correct) {
-                    resultHtml += '<br><span style="color:green;font-weight:bold;">✓ CORRECT</span>';
+                    resultHtml += '<br><span style="color:green;font-weight:bold;">CORRECT</span>';
                 } else {
-                    resultHtml += '<br><span style="color:red;font-weight:bold;">✗ WRONG</span>';
+                    resultHtml += '<br><span style="color:red;font-weight:bold;">WRONG</span>';
                 }
             }
             document.getElementById('result').innerHTML = resultHtml;
