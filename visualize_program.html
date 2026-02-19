@@ -401,16 +401,16 @@
         function getReg(reg, col) {
             let neg = false;
             if (reg.startsWith('~')) { reg = reg.slice(1); neg = true; }
-            if (!registers[reg]) registers[reg] = new Array(8).fill(0);
+            if (!registers[reg]) return neg ? 1 : 0;
             let v = registers[reg][col];
             if (v === undefined || v === null) v = 0;
             return neg ? 1 - v : v;
         }
         
         function setReg(reg, col, val) {
-            if (!registers[reg]) registers[reg] = new Array(8).fill(null);
             let neg = false;
             if (reg.startsWith('~')) { reg = reg.slice(1); neg = true; }
+            if (!registers[reg]) registers[reg] = new Array(8).fill(null);
             registers[reg][col] = neg ? 1 - val : val;
         }
         
