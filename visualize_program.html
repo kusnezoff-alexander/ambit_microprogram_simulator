@@ -104,15 +104,6 @@
                 }
             }
             console.log('Init complete. Programs:', Object.keys(programs));
-            // Debug: Check first few instructions of abs4
-            if (programs['abs4']) {
-                console.log('abs4 first 5 instructions:');
-                for (let i = 0; i < Math.min(5, programs['abs4'].instrs.length); i++) {
-                    const instr = programs['abs4'].instrs[i];
-                    const rows = getActivatedRows(instr);
-                    console.log(`  ${i}: ${instr.type} ${instr.args.join(' ')} -> rows: [${Array.from(rows).join(', ')}]`);
-                }
-            }
         }
         
         function parseProgram(text) {
@@ -219,7 +210,7 @@
             
             program = programs[name];
             pc = 0;
-            console.log('Loaded program:', name, 'inputs:', program.inputs, 'outputs:', program.outputs);
+
             
             // Determine bitwidth from name
             bitWidth = name.startsWith('abs') ? parseInt(name.slice(3)) : parseInt(name.slice(8));
@@ -236,8 +227,6 @@
             const allRows = getAllRowNames(program);
             
             // Initialize ALL rows upfront (not just inputs/outputs)
-            console.log('All rows from program:', Array.from(allRows).sort());
-            console.log('Does allRows contain DCC0?', allRows.has('DCC0'));
             for (const rowName of allRows) {
                 if (rowName.startsWith('I')) {
                     // Input row
@@ -270,35 +259,59 @@
             activatedRows = new Set();
             scrollOffset = 0;
 
-            console.log('Initialized registers:', Object.keys(registers).sort());
-            console.log('Checking for DCC0:', registers['DCC0'] ? 'found' : 'missing');
-            console.log('Checking for S2:', registers['S2'] ? 'found' : 'missing');
-            console.log('registers["DCC0"] exists:', 'DCC0' in registers);
-            console.log('registers["DCC0"] type:', typeof registers['DCC0']);
+
 
             render();
         }
         
         function render() {
-            // Render memory array - DRAM-style grid with windowed view
+            // Render memory array - DRAM-style grid
+            // Shows activated rows + surrounding context, with ellipsis for gaps
             const numCols = 8;
             
             // Get all register names sorted
-            const regNames = sortRowNames(Object.keys(registers));
-            const totalRows = regNames.length;
+            const allRegNames = sortRowNames(Object.keys(registers));
+            const totalRows = allRegNames.length;
             
-            // Calculate scroll bounds
-            const maxScroll = Math.max(0, totalRows - MAX_VISIBLE_ROWS);
-            scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
+            // Build list of rows to display:
+            // All activated rows + a few rows of context around each
+            const CONTEXT = 2;  // Show 2 rows above/below each activated row
+            const rowIndicesToShow = new Set();
+            
+            if (activatedRows.size === 0 || totalRows <= MAX_VISIBLE_ROWS) {
+                // No active instruction or small program: show windowed view
+                const maxScroll = Math.max(0, totalRows - MAX_VISIBLE_ROWS);
+                scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
+                for (let i = scrollOffset; i < Math.min(scrollOffset + MAX_VISIBLE_ROWS, totalRows); i++) {
+                    rowIndicesToShow.add(i);
+                }
+            } else {
+                // Show activated rows with context
+                for (const row of activatedRows) {
+                    const idx = allRegNames.indexOf(row);
+                    if (idx === -1) continue;
+                    for (let i = Math.max(0, idx - CONTEXT); i <= Math.min(totalRows - 1, idx + CONTEXT); i++) {
+                        rowIndicesToShow.add(i);
+                    }
+                }
+            }
+            
+            // Convert to sorted array
+            const sortedIndices = Array.from(rowIndicesToShow).sort((a, b) => a - b);
             
             let html = '<div style="position:relative;">';
             
-            // Scroll controls
-            html += '<div style="display:flex; gap:10px; margin-bottom:10px; align-items:center;">';
-            html += `<button onclick="scrollRows(-4)" ${scrollOffset <= 0 ? 'disabled' : ''}>&uarr; Up</button>`;
-            html += `<span style="font-size:12px; color:#666;">Rows ${scrollOffset + 1}-${Math.min(scrollOffset + MAX_VISIBLE_ROWS, totalRows)} of ${totalRows}</span>`;
-            html += `<button onclick="scrollRows(4)" ${scrollOffset >= maxScroll ? 'disabled' : ''}>Down &darr;</button>`;
-            html += '</div>';
+            // Scroll controls (only when no activated rows)
+            if (activatedRows.size === 0) {
+                const maxScroll = Math.max(0, totalRows - MAX_VISIBLE_ROWS);
+                html += '<div style="display:flex; gap:10px; margin-bottom:10px; align-items:center;">';
+                html += `<button onclick="scrollRows(-4)" ${scrollOffset <= 0 ? 'disabled' : ''}>&uarr; Up</button>`;
+                html += `<span style="font-size:12px; color:#666;">Rows ${scrollOffset + 1}-${Math.min(scrollOffset + MAX_VISIBLE_ROWS, totalRows)} of ${totalRows}</span>`;
+                html += `<button onclick="scrollRows(4)" ${scrollOffset >= maxScroll ? 'disabled' : ''}>Down &darr;</button>`;
+                html += '</div>';
+            } else {
+                html += `<div style="font-size:12px; color:#666; margin-bottom:10px;">${totalRows} rows total, showing ${sortedIndices.length} relevant</div>`;
+            }
             
             html += '<table border="1" style="border-collapse:collapse; width:100%;">';
             
@@ -309,25 +322,25 @@
             }
             html += '</tr>';
             
-            // Show "..." indicator if there are hidden rows above
-            if (scrollOffset > 0) {
-                html += '<tr><td colspan="' + (numCols + 1) + '" style="text-align:center; padding:4px; background:#f0f0f0; color:#666; font-size:14px;">&#x22EE;</td></tr>';
+            // Ellipsis before first row if needed
+            if (sortedIndices.length > 0 && sortedIndices[0] > 0) {
+                html += '<tr><td colspan="' + (numCols + 1) + '" style="text-align:center; padding:2px; background:#f0f0f0; color:#999; font-size:12px;">&#x22EE; ' + sortedIndices[0] + ' rows above</td></tr>';
             }
             
-            // Data rows - only show window
-            const visibleRows = regNames.slice(scrollOffset, scrollOffset + MAX_VISIBLE_ROWS);
-            // DEBUG: Log highlighting state
-            if (activatedRows.size > 0) {
-                console.log('Rendering - activatedRows:', Array.from(activatedRows));
-                console.log('Visible rows:', visibleRows);
-            }
-            for (const reg of visibleRows) {
+            // Render visible rows with ellipsis for gaps
+            for (let si = 0; si < sortedIndices.length; si++) {
+                const idx = sortedIndices[si];
+                const reg = allRegNames[idx];
                 const vals = registers[reg];
                 if (!vals) continue;
-                const isActivated = activatedRows.has(reg);
-                if (activatedRows.size > 0) {
-                    console.log('Checking row:', reg, 'isActivated:', isActivated, 'activatedRows has:', Array.from(activatedRows));
+                
+                // Check for gap between this and previous row
+                if (si > 0 && sortedIndices[si] - sortedIndices[si - 1] > 1) {
+                    const gap = sortedIndices[si] - sortedIndices[si - 1] - 1;
+                    html += '<tr><td colspan="' + (numCols + 1) + '" style="text-align:center; padding:2px; background:#f0f0f0; color:#999; font-size:12px;">&#x22EE; ' + gap + ' rows hidden</td></tr>';
                 }
+                
+                const isActivated = activatedRows.has(reg);
                 const rowBg = isActivated ? '#fff3cd' : '#e7f3ff';
                 const rowBorder = isActivated ? 'border-left: 4px solid #ffc107;' : '';
                 html += `<tr style="${rowBorder}"><td style="padding:8px;background:${rowBg};font-weight:bold; font-family:monospace;">${reg}</td>`;
@@ -343,9 +356,10 @@
                 html += '</tr>';
             }
             
-            // Show "..." indicator if there are hidden rows below
-            if (scrollOffset + MAX_VISIBLE_ROWS < totalRows) {
-                html += '<tr><td colspan="' + (numCols + 1) + '" style="text-align:center; padding:4px; background:#f0f0f0; color:#666; font-size:14px;">&#x22EE;</td></tr>';
+            // Ellipsis after last row if needed
+            if (sortedIndices.length > 0 && sortedIndices[sortedIndices.length - 1] < totalRows - 1) {
+                const gap = totalRows - 1 - sortedIndices[sortedIndices.length - 1];
+                html += '<tr><td colspan="' + (numCols + 1) + '" style="text-align:center; padding:2px; background:#f0f0f0; color:#999; font-size:12px;">&#x22EE; ' + gap + ' rows below</td></tr>';
             }
             
             html += '</table></div>';
@@ -482,7 +496,7 @@
                     
                     if (dest) setReg(dest, c, result);
                 }
-                console.log('Executed AAP:', instr.args, 'dest:', dest, 'src:', srcArg, 'maj:', majorityArgs);
+
             }
             
             pc++;
@@ -505,13 +519,10 @@
         }
         
         function step() {
-            // Set activated rows for current instruction before executing
+            // Set activated rows for current instruction BEFORE executing
             if (pc < program.instrs.length) {
                 const instr = program.instrs[pc];
                 activatedRows = getActivatedRows(instr);
-                console.log('Step', pc, ':', instr.type, instr.args, '-> activated:', Array.from(activatedRows));
-                // Auto-scroll to show activated rows
-                autoScrollToActivatedRows();
             } else {
                 activatedRows = new Set();
             }
@@ -569,8 +580,6 @@
             // Set activated rows for the instruction at position n
             if (pc < program.instrs.length) {
                 activatedRows = getActivatedRows(program.instrs[pc]);
-                // Auto-scroll to show activated rows
-                autoScrollToActivatedRows();
             } else {
                 activatedRows = new Set();
             }
@@ -578,37 +587,8 @@
             render();
         }
 
-        // Auto-scroll to make activated rows visible
-        function autoScrollToActivatedRows() {
-            if (activatedRows.size === 0) return;
-
-            const regNames = sortRowNames(Object.keys(registers));
-            const activatedIndices = [];
-
-            for (const row of activatedRows) {
-                const idx = regNames.indexOf(row);
-                if (idx !== -1) {
-                    activatedIndices.push(idx);
-                }
-            }
-
-            if (activatedIndices.length === 0) return;
-
-            const minIdx = Math.min(...activatedIndices);
-            const maxIdx = Math.max(...activatedIndices);
-
-            // Ensure the activated rows are in view
-            if (maxIdx >= scrollOffset + MAX_VISIBLE_ROWS) {
-                scrollOffset = maxIdx - MAX_VISIBLE_ROWS + 1;
-            }
-            if (minIdx < scrollOffset) {
-                scrollOffset = minIdx;
-            }
-
-            // Clamp scroll offset
-            const maxScroll = Math.max(0, regNames.length - MAX_VISIBLE_ROWS);
-            scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
-        }
+        // Auto-scroll to make activated rows visible - no longer needed
+        // since we now show only activated + context rows
         
         // Extract row names activated by an instruction
         function getActivatedRows(instr) {
