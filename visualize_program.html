@@ -237,6 +237,7 @@
             
             // Initialize ALL rows upfront (not just inputs/outputs)
             console.log('All rows from program:', Array.from(allRows).sort());
+            console.log('Does allRows contain DCC0?', allRows.has('DCC0'));
             for (const rowName of allRows) {
                 if (rowName.startsWith('I')) {
                     // Input row
@@ -269,7 +270,8 @@
             activatedRows = new Set();
             scrollOffset = 0;
 
-            console.log('Initialized registers:', Object.keys(registers));
+            console.log('Initialized registers:', Object.keys(registers).sort());
+            console.log('Checking for DCC0:', registers['DCC0'] ? 'found' : 'missing');
             console.log('Checking for S2:', registers['S2'] ? 'found' : 'missing');
 
             render();
@@ -312,10 +314,18 @@
             
             // Data rows - only show window
             const visibleRows = regNames.slice(scrollOffset, scrollOffset + MAX_VISIBLE_ROWS);
+            // DEBUG: Log highlighting state
+            if (activatedRows.size > 0) {
+                console.log('Rendering - activatedRows:', Array.from(activatedRows));
+                console.log('Visible rows:', visibleRows);
+            }
             for (const reg of visibleRows) {
                 const vals = registers[reg];
                 if (!vals) continue;
                 const isActivated = activatedRows.has(reg);
+                if (activatedRows.size > 0 && isActivated) {
+                    console.log('Highlighting row:', reg);
+                }
                 const rowBg = isActivated ? '#fff3cd' : '#e7f3ff';
                 const rowBorder = isActivated ? 'border-left: 4px solid #ffc107;' : '';
                 html += `<tr style="${rowBorder}"><td style="padding:8px;background:${rowBg};font-weight:bold; font-family:monospace;">${reg}</td>`;
