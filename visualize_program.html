@@ -58,8 +58,8 @@
             <span id="counter" style="padding:10px;">-- / --</span>
         </div>
         <div style="margin-top:10px; display:flex; gap:15px; align-items:center; font-size:13px;">
-            <label>t<sub>AAP</sub>: <input type="number" id="tAAP" value="49" style="width:60px; padding:4px;"> ns</label>
-            <label>t<sub>AP</sub>: <input type="number" id="tAP" value="35" style="width:60px; padding:4px;"> ns</label>
+            <label>t<sub>AAP</sub>: <input type="number" id="tAAP" value="49" style="width:60px; padding:4px;" oninput="updateStats()"> ns</label>
+            <label>t<sub>AP</sub>: <input type="number" id="tAP" value="35" style="width:60px; padding:4px;" oninput="updateStats()"> ns</label>
         </div>
     </div>
 
@@ -428,19 +428,7 @@
             document.getElementById('counter').textContent = `${pc} / ${program.instrs.length}`;
             
             // Render program statistics
-            let numAAP = 0, numAP = 0;
-            for (const instr of program.instrs) {
-                if (instr.type === 'AAP') numAAP++;
-                else if (instr.type === 'AP') numAP++;
-            }
-            const tAAP = parseFloat(document.getElementById('tAAP').value) || 0;
-            const tAP = parseFloat(document.getElementById('tAP').value) || 0;
-            const totalLatency = numAAP * tAAP + numAP * tAP;
-            
-            let statsHtml = `<b>${numAAP}</b> AAP &times; ${tAAP} ns = ${(numAAP * tAAP).toFixed(1)} ns<br>`;
-            statsHtml += `<b>${numAP}</b> AP &times; ${tAP} ns = ${(numAP * tAP).toFixed(1)} ns<br>`;
-            statsHtml += `<b>Total: ${numAAP + numAP}</b> instructions, <b>${totalLatency.toFixed(1)} ns</b> latency`;
-            document.getElementById('stats').innerHTML = statsHtml;
+            updateStats();
             
             // Render result - reconstruct from packed vertical layout
             // Each column has an output value, combine bit rows for each column
@@ -724,6 +712,23 @@
                 if (orderA !== orderB) return orderA - orderB;
                 return pa.index - pb.index;
             });
+        }
+
+        function updateStats() {
+            if (!program) return;
+            let numAAP = 0, numAP = 0;
+            for (const instr of program.instrs) {
+                if (instr.type === 'AAP') numAAP++;
+                else if (instr.type === 'AP') numAP++;
+            }
+            const tAAP = parseFloat(document.getElementById('tAAP').value) || 0;
+            const tAP = parseFloat(document.getElementById('tAP').value) || 0;
+            const totalLatency = numAAP * tAAP + numAP * tAP;
+            
+            let statsHtml = `<b>${numAAP}</b> AAP &times; ${tAAP} ns = ${(numAAP * tAAP).toFixed(1)} ns<br>`;
+            statsHtml += `<b>${numAP}</b> AP &times; ${tAP} ns = ${(numAP * tAP).toFixed(1)} ns<br>`;
+            statsHtml += `<b>Total: ${numAAP + numAP}</b> instructions, <b>${totalLatency.toFixed(1)} ns</b> latency`;
+            document.getElementById('stats').innerHTML = statsHtml;
         }
 
         // Scroll through rows
