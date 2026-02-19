@@ -262,7 +262,7 @@
         function render() {
             // Render memory array - DRAM-style grid
             // Rows = registers, Columns = bit positions
-            const numCols = Math.min(8, bitWidth);
+            const numCols = 8;  // Fixed: 8 columns for parallel computations
             
             // Get active registers sorted
             const regNames = Object.keys(registers).sort((a,b) => {
@@ -368,7 +368,7 @@
             if (pc >= program.instrs.length) return;
             
             const instr = program.instrs[pc];
-            const numCols = Math.min(8, bitWidth);
+            const numCols = 8;  // Fixed: 8 columns for parallel computations
             
             if (instr.type === 'AAP') {
                 // AAP can be:
@@ -458,10 +458,9 @@
             
             pc = 0;
             bitWidth = name.startsWith('abs') ? parseInt(name.slice(3)) : parseInt(name.slice(8));
-            const numCols = Math.min(8, bitWidth);
+            const numCols = 8;
             
             registers = {};
-            const numCols = 8;
             const inputArray = Array.isArray(inputData) ? inputData : [inputData];
             
             // Re-initialize with vertical layout
