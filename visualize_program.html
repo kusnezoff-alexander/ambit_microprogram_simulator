@@ -266,121 +266,145 @@
             render();
         }
         
-        function render() {
-            // Render memory array - DRAM-style grid
-            // Shows activated rows + surrounding context, with ellipsis for gaps
-            const numCols = 8;
-            
-            // Get all register names sorted
-            const allRegNames = sortRowNames(Object.keys(registers));
-            const totalRows = allRegNames.length;
-            
-            // Build list of rows to display:
-            // Always show output rows + activated rows with context
-            const CONTEXT = 2;  // Show 2 rows above/below each activated row
-            const rowIndicesToShow = new Set();
-            
-            // Always show all output rows
-            for (let i = 0; i < totalRows; i++) {
-                if (allRegNames[i].startsWith('O')) {
-                    rowIndicesToShow.add(i);
-                }
-            }
-            
-            // Combine activated + previous rows for visibility check
-            const allRelevantRows = new Set([...activatedRows, ...previousRows]);
-            
-            if (allRelevantRows.size === 0 || totalRows <= MAX_VISIBLE_ROWS) {
-                // No active instruction or small program: show windowed view
-                const maxScroll = Math.max(0, totalRows - MAX_VISIBLE_ROWS);
-                scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
-                for (let i = scrollOffset; i < Math.min(scrollOffset + MAX_VISIBLE_ROWS, totalRows); i++) {
-                    rowIndicesToShow.add(i);
-                }
+        // Helper: render a single row as HTML
+        function renderRow(reg, numCols) {
+            const vals = registers[reg];
+            if (!vals) return '';
+            const isActivated = activatedRows.has(reg);
+            const isPrevious = previousRows.has(reg) && !isActivated;
+            let rowBg, rowBorder;
+            if (isActivated) {
+                rowBg = '#fff3cd'; rowBorder = 'border-left: 4px solid #ffc107;';
+            } else if (isPrevious) {
+                rowBg = '#e8f4fd'; rowBorder = 'border-left: 4px solid #17a2b8;';
             } else {
-                // Show activated + previous rows with context
-                for (const row of allRelevantRows) {
-                    const idx = allRegNames.indexOf(row);
-                    if (idx === -1) continue;
-                    for (let i = Math.max(0, idx - CONTEXT); i <= Math.min(totalRows - 1, idx + CONTEXT); i++) {
-                        rowIndicesToShow.add(i);
-                    }
-                }
+                rowBg = '#e7f3ff'; rowBorder = '';
             }
-            
-            // Convert to sorted array
-            const sortedIndices = Array.from(rowIndicesToShow).sort((a, b) => a - b);
-            
-            let html = '<div style="position:relative;">';
-            
-            // Scroll controls (only when no activated rows)
-            if (activatedRows.size === 0) {
-                const maxScroll = Math.max(0, totalRows - MAX_VISIBLE_ROWS);
-                html += '<div style="display:flex; gap:10px; margin-bottom:10px; align-items:center;">';
-                html += `<button onclick="scrollRows(-4)" ${scrollOffset <= 0 ? 'disabled' : ''}>&uarr; Up</button>`;
-                html += `<span style="font-size:12px; color:#666;">Rows ${scrollOffset + 1}-${Math.min(scrollOffset + MAX_VISIBLE_ROWS, totalRows)} of ${totalRows}</span>`;
-                html += `<button onclick="scrollRows(4)" ${scrollOffset >= maxScroll ? 'disabled' : ''}>Down &darr;</button>`;
-                html += '</div>';
-            } else {
-                html += `<div style="font-size:12px; color:#666; margin-bottom:10px;">${totalRows} rows total, showing ${sortedIndices.length} relevant</div>`;
-            }
-            
-            html += '<table border="1" style="border-collapse:collapse; width:100%;">';
-            
-            // Header row
-            html += '<tr><th style="padding:8px;background:#007bff;color:white; min-width:80px;">Row \\ Col</th>';
+            let html = `<tr style="${rowBorder}"><td style="padding:6px 8px;background:${rowBg};font-weight:bold; font-family:monospace;">${reg}</td>`;
             for (let c = 0; c < numCols; c++) {
-                html += `<th style="padding:8px;background:#007bff;color:white; width:50px;">${c}</th>`;
+                const v = vals[c];
+                let bg = v === 1 ? '#d4edda' : v === 0 ? '#f8d7da' : '#f5f5f5';
+                const color = v === 1 ? '#28a745' : v === 0 ? '#dc3545' : '#333';
+                if (isActivated) {
+                    bg = v === 1 ? '#c3e6cb' : v === 0 ? '#f5c6cb' : '#e9ecef';
+                } else if (isPrevious) {
+                    bg = v === 1 ? '#c8e6c9' : v === 0 ? '#f5c6cb' : '#e0e0e0';
+                }
+                html += `<td style="padding:6px 8px;background:${bg};color:${color};text-align:center; font-family:monospace;">${v === null ? '?' : v}</td>`;
             }
             html += '</tr>';
-            
-            // Ellipsis before first row if needed
-            if (sortedIndices.length > 0 && sortedIndices[0] > 0) {
-                html += '<tr><td colspan="' + (numCols + 1) + '" style="text-align:center; padding:2px; background:#f0f0f0; color:#999; font-size:12px;">&#x22EE; ' + sortedIndices[0] + ' rows above</td></tr>';
+            return html;
+        }
+
+        // Helper: render ellipsis row
+        function renderEllipsis(numCols, label) {
+            return '<tr><td colspan="' + (numCols + 1) + '" style="text-align:center; padding:2px; background:#f0f0f0; color:#999; font-size:12px;">&#x22EE; ' + label + '</td></tr>';
+        }
+
+        // Helper: render table header
+        function renderHeader(numCols, label) {
+            let html = '<tr><th style="padding:6px 8px;background:#007bff;color:white; min-width:80px;">' + label + '</th>';
+            for (let c = 0; c < numCols; c++) {
+                html += `<th style="padding:6px 8px;background:#007bff;color:white; width:50px;">${c}</th>`;
             }
+            html += '</tr>';
+            return html;
+        }
+
+        function render() {
+            const numCols = 8;
+            const allRegNames = sortRowNames(Object.keys(registers));
             
-            // Render visible rows with ellipsis for gaps
-            for (let si = 0; si < sortedIndices.length; si++) {
-                const idx = sortedIndices[si];
-                const reg = allRegNames[idx];
-                const vals = registers[reg];
-                if (!vals) continue;
-                
-                // Check for gap between this and previous row
-                if (si > 0 && sortedIndices[si] - sortedIndices[si - 1] > 1) {
-                    const gap = sortedIndices[si] - sortedIndices[si - 1] - 1;
-                    html += '<tr><td colspan="' + (numCols + 1) + '" style="text-align:center; padding:2px; background:#f0f0f0; color:#999; font-size:12px;">&#x22EE; ' + gap + ' rows hidden</td></tr>';
-                }
-                
-                const isActivated = activatedRows.has(reg);
-                const isPrevious = previousRows.has(reg) && !isActivated;
-                let rowBg, rowBorder;
-                if (isActivated) {
-                    rowBg = '#fff3cd'; rowBorder = 'border-left: 4px solid #ffc107;';
-                } else if (isPrevious) {
-                    rowBg = '#e8f4fd'; rowBorder = 'border-left: 4px solid #17a2b8;';
+            // Split rows into two groups:
+            // 1. Compute rows (T*, DCC*) - always shown at bottom
+            // 2. Data rows (I*, O*, C*, S*) - shown in scrollable section at top
+            const computeRows = [];
+            const dataRows = [];
+            for (const reg of allRegNames) {
+                if (reg.startsWith('T') || reg.startsWith('DCC')) {
+                    computeRows.push(reg);
                 } else {
-                    rowBg = '#e7f3ff'; rowBorder = '';
+                    dataRows.push(reg);
                 }
-                html += `<tr style="${rowBorder}"><td style="padding:8px;background:${rowBg};font-weight:bold; font-family:monospace;">${reg}</td>`;
-                for (let c = 0; c < numCols; c++) {
-                    const v = vals[c];
-                    let bg = v === 1 ? '#d4edda' : v === 0 ? '#f8d7da' : '#f5f5f5';
-                    const color = v === 1 ? '#28a745' : v === 0 ? '#dc3545' : '#333';
-                    if (isActivated) {
-                        bg = v === 1 ? '#c3e6cb' : v === 0 ? '#f5c6cb' : '#e9ecef';
-                    } else if (isPrevious) {
-                        bg = v === 1 ? '#c8e6c9' : v === 0 ? '#f5c6cb' : '#e0e0e0';
-                    }
-                    html += `<td style="padding:8px;background:${bg};color:${color};text-align:center; font-family:monospace;">${v === null ? '?' : v}</td>`;
-                }
-                html += '</tr>';
             }
             
-            // Ellipsis after last row if needed
-            if (sortedIndices.length > 0 && sortedIndices[sortedIndices.length - 1] < totalRows - 1) {
-                const gap = totalRows - 1 - sortedIndices[sortedIndices.length - 1];
-                html += '<tr><td colspan="' + (numCols + 1) + '" style="text-align:center; padding:2px; background:#f0f0f0; color:#999; font-size:12px;">&#x22EE; ' + gap + ' rows below</td></tr>';
+            // Determine which data rows to show (max ~10)
+            const MAX_DATA_ROWS = 10;
+            const allRelevantRows = new Set([...activatedRows, ...previousRows]);
+            
+            // Always include O* rows; then activated/previous data rows; fill rest with scroll window
+            const dataIndicesToShow = new Set();
+            
+            // Always show output rows
+            for (let i = 0; i < dataRows.length; i++) {
+                if (dataRows[i].startsWith('O')) {
+                    dataIndicesToShow.add(i);
+                }
+            }
+            
+            // Show activated/previous data rows
+            for (const row of allRelevantRows) {
+                const idx = dataRows.indexOf(row);
+                if (idx !== -1) dataIndicesToShow.add(idx);
+            }
+            
+            // If still room, fill with scroll window
+            if (dataIndicesToShow.size < MAX_DATA_ROWS) {
+                const maxScroll = Math.max(0, dataRows.length - MAX_DATA_ROWS);
+                scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
+                for (let i = scrollOffset; i < Math.min(scrollOffset + MAX_DATA_ROWS, dataRows.length); i++) {
+                    dataIndicesToShow.add(i);
+                }
+            }
+            
+            const sortedDataIndices = Array.from(dataIndicesToShow).sort((a, b) => a - b);
+            
+            // --- Render data rows section ---
+            let html = '<div>';
+            html += `<div style="font-size:12px; color:#666; margin-bottom:4px;">${allRegNames.length} rows total</div>`;
+            
+            // Scroll controls for data section
+            const maxScroll = Math.max(0, dataRows.length - MAX_DATA_ROWS);
+            html += '<div style="display:flex; gap:10px; margin-bottom:6px; align-items:center;">';
+            html += `<button onclick="scrollRows(-4)" style="padding:4px 10px;" ${scrollOffset <= 0 ? 'disabled' : ''}>&uarr;</button>`;
+            html += `<button onclick="scrollRows(4)" style="padding:4px 10px;" ${scrollOffset >= maxScroll ? 'disabled' : ''}>&darr;</button>`;
+            html += '</div>';
+            
+            html += '<table border="1" style="border-collapse:collapse; width:100%;">';
+            html += renderHeader(numCols, 'Data Rows');
+            
+            // Ellipsis before first data row
+            if (sortedDataIndices.length > 0 && sortedDataIndices[0] > 0) {
+                html += renderEllipsis(numCols, sortedDataIndices[0] + ' rows above');
+            }
+            
+            for (let si = 0; si < sortedDataIndices.length; si++) {
+                const idx = sortedDataIndices[si];
+                const reg = dataRows[idx];
+                
+                // Gap ellipsis
+                if (si > 0 && sortedDataIndices[si] - sortedDataIndices[si - 1] > 1) {
+                    const gap = sortedDataIndices[si] - sortedDataIndices[si - 1] - 1;
+                    html += renderEllipsis(numCols, gap + ' rows hidden');
+                }
+                
+                html += renderRow(reg, numCols);
+            }
+            
+            // Ellipsis after last data row
+            if (sortedDataIndices.length > 0 && sortedDataIndices[sortedDataIndices.length - 1] < dataRows.length - 1) {
+                const gap = dataRows.length - 1 - sortedDataIndices[sortedDataIndices.length - 1];
+                html += renderEllipsis(numCols, gap + ' rows below');
+            }
+            
+            html += '</table>';
+            
+            // --- Render compute rows section (always visible) ---
+            html += '<table border="1" style="border-collapse:collapse; width:100%; margin-top:8px;">';
+            html += renderHeader(numCols, 'Compute Rows');
+            
+            for (const reg of computeRows) {
+                html += renderRow(reg, numCols);
             }
             
             html += '</table></div>';
