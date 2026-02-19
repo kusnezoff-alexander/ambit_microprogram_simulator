@@ -273,6 +273,8 @@
             console.log('Initialized registers:', Object.keys(registers).sort());
             console.log('Checking for DCC0:', registers['DCC0'] ? 'found' : 'missing');
             console.log('Checking for S2:', registers['S2'] ? 'found' : 'missing');
+            console.log('registers["DCC0"] exists:', 'DCC0' in registers);
+            console.log('registers["DCC0"] type:', typeof registers['DCC0']);
 
             render();
         }
@@ -323,8 +325,8 @@
                 const vals = registers[reg];
                 if (!vals) continue;
                 const isActivated = activatedRows.has(reg);
-                if (activatedRows.size > 0 && isActivated) {
-                    console.log('Highlighting row:', reg);
+                if (activatedRows.size > 0) {
+                    console.log('Checking row:', reg, 'isActivated:', isActivated, 'activatedRows has:', Array.from(activatedRows));
                 }
                 const rowBg = isActivated ? '#fff3cd' : '#e7f3ff';
                 const rowBorder = isActivated ? 'border-left: 4px solid #ffc107;' : '';
