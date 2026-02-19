@@ -83,6 +83,8 @@
         let registers = {};
         let bitWidth = 4;
         let activatedRows = new Set();  // Rows activated by current instruction
+        let scrollOffset = 0;  // Scroll position for row window
+        const MAX_VISIBLE_ROWS = 16;  // Maximum rows to show at once
         
         // Programs embedded directly
         const programs = {};
@@ -218,35 +220,36 @@
             
             // Initialize registers as arrays
             registers = {};
+            scrollOffset = 0;  // Reset scroll on load
             
             // PACKED VERTICAL LAYOUT: Each column holds one operand
-            // For input [5,1,2,3] with 4-bit abs:
-            // I0 = [bit0(5), bit0(1), bit0(2), bit0(3), 0, 0, 0, 0] = [1, 1, 0, 1, 0, 0, 0, 0]
-            // I1 = [bit1(5), bit1(1), bit1(2), bit1(3), 0, 0, 0, 0] = [0, 0, 1, 1, 0, 0, 0, 0]
-            // etc.
             const inputArray = Array.isArray(inputData) ? inputData : [inputData];
             
-            // Each row contains the same bit position across all input operands
-            // Only need rows I0-I(bitWidth-1) since the program processes one input at a time
-            for (let bitPos = 0; bitPos < bitWidth; bitPos++) {
-                const rowName = 'I' + bitPos;
-                registers[rowName] = new Array(numCols).fill(0);
-                // Fill columns with bits from each input value
-                for (let col = 0; col < inputArray.length && col < numCols; col++) {
-                    const val = inputArray[col] || 0;
-                    registers[rowName][col] = (val >> bitPos) & 1;
+            // Get all rows referenced in the program
+            const allRows = getAllRowNames(program);
+            
+            // Initialize ALL rows upfront (not just inputs/outputs)
+            for (const rowName of allRows) {
+                if (rowName.startsWith('I')) {
+                    // Input row
+                    const bitPos = parseInt(rowName.slice(1));
+                    registers[rowName] = new Array(numCols).fill(0);
+                    for (let col = 0; col < inputArray.length && col < numCols; col++) {
+                        const val = inputArray[col] || 0;
+                        registers[rowName][col] = (val >> bitPos) & 1;
+                    }
+                } else if (rowName.startsWith('O')) {
+                    // Output row
+                    registers[rowName] = new Array(numCols).fill(null);
+                } else if (rowName === 'C0') {
+                    registers[rowName] = new Array(numCols).fill(0);
+                } else if (rowName === 'C1') {
+                    registers[rowName] = new Array(numCols).fill(1);
+                } else {
+                    // T, S, DCC rows - initialize to null
+                    registers[rowName] = new Array(numCols).fill(null);
                 }
             }
-            
-            // Outputs: Each row contains same bit position across all outputs
-            for (let bitPos = 0; bitPos < bitWidth; bitPos++) {
-                const rowName = 'O' + bitPos;
-                registers[rowName] = new Array(numCols).fill(null);
-            }
-            
-            // Constants - exist at row C0 and C1
-            registers['C0'] = new Array(numCols).fill(0);
-            registers['C1'] = new Array(numCols).fill(1);
             
             // Show main area
             document.getElementById('main').style.display = 'block';
@@ -254,8 +257,9 @@
             document.getElementById('runBtn').disabled = false;
             document.getElementById('resetBtn').disabled = false;
 
-            // Clear activated rows on load
+            // Clear activated rows and scroll on load
             activatedRows = new Set();
+            scrollOffset = 0;
 
             console.log('Initialized registers:', Object.keys(registers));
 
@@ -263,49 +267,67 @@
         }
         
         function render() {
-            // Render memory array - DRAM-style grid
-            // Rows = registers, Columns = bit positions
-            const numCols = 8;  // Fixed: 8 columns for parallel computations
+            // Render memory array - DRAM-style grid with windowed view
+            const numCols = 8;
             
-            // Get active registers sorted
-            const regNames = Object.keys(registers).sort((a,b) => {
-                const order = {'I':0,'O':1,'C':2,'T':3,'S':4,'DCC':5};
-                const at = a.match(/^[A-Z]+/)?.[0] || '';
-                const bt = b.match(/^[A-Z]+/)?.[0] || '';
-                return (order[at]??6) - (order[bt]??6) || (parseInt(a.slice(1))||0) - (parseInt(b.slice(1))||0);
-            });
+            // Get all register names sorted
+            const regNames = sortRowNames(Object.keys(registers));
+            const totalRows = regNames.length;
             
-            let html = '<table border="1" style="border-collapse:collapse;">';
+            // Calculate scroll bounds
+            const maxScroll = Math.max(0, totalRows - MAX_VISIBLE_ROWS);
+            scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
+            
+            let html = '<div style="position:relative;">';
+            
+            // Scroll controls
+            html += '<div style="display:flex; gap:10px; margin-bottom:10px; align-items:center;">';
+            html += `<button onclick="scrollRows(-4)" ${scrollOffset <= 0 ? 'disabled' : ''}>&uarr; Up</button>`;
+            html += `<span style="font-size:12px; color:#666;">Rows ${scrollOffset + 1}-${Math.min(scrollOffset + MAX_VISIBLE_ROWS, totalRows)} of ${totalRows}</span>`;
+            html += `<button onclick="scrollRows(4)" ${scrollOffset >= maxScroll ? 'disabled' : ''}>Down &darr;</button>`;
+            html += '</div>';
+            
+            html += '<table border="1" style="border-collapse:collapse; width:100%;">';
             
             // Header row
-            html += '<tr><th style="padding:8px;background:#007bff;color:white;">Row \\ Col</th>';
+            html += '<tr><th style="padding:8px;background:#007bff;color:white; min-width:80px;">Row \\ Col</th>';
             for (let c = 0; c < numCols; c++) {
-                html += `<th style="padding:8px;background:#007bff;color:white;">${c}</th>`;
+                html += `<th style="padding:8px;background:#007bff;color:white; width:50px;">${c}</th>`;
             }
             html += '</tr>';
             
-            // Data rows
-            for (const reg of regNames) {
+            // Show "..." indicator if there are hidden rows above
+            if (scrollOffset > 0) {
+                html += '<tr><td colspan="' + (numCols + 1) + '" style="text-align:center; padding:4px; background:#f0f0f0; color:#666; font-size:14px;">&#x22EE;</td></tr>';
+            }
+            
+            // Data rows - only show window
+            const visibleRows = regNames.slice(scrollOffset, scrollOffset + MAX_VISIBLE_ROWS);
+            for (const reg of visibleRows) {
                 const vals = registers[reg];
                 if (!vals) continue;
-                // Highlight activated rows with yellow background
                 const isActivated = activatedRows.has(reg);
                 const rowBg = isActivated ? '#fff3cd' : '#e7f3ff';
                 const rowBorder = isActivated ? 'border-left: 4px solid #ffc107;' : '';
-                html += `<tr style="${rowBorder}"><td style="padding:8px;background:${rowBg};font-weight:bold;">${reg}</td>`;
+                html += `<tr style="${rowBorder}"><td style="padding:8px;background:${rowBg};font-weight:bold; font-family:monospace;">${reg}</td>`;
                 for (let c = 0; c < numCols; c++) {
                     const v = vals[c];
                     let bg = v === 1 ? '#d4edda' : v === 0 ? '#f8d7da' : '#f5f5f5';
                     const color = v === 1 ? '#28a745' : v === 0 ? '#dc3545' : '#333';
-                    // Darken activated row cells slightly
                     if (isActivated) {
                         bg = v === 1 ? '#c3e6cb' : v === 0 ? '#f5c6cb' : '#e9ecef';
                     }
-                    html += `<td style="padding:8px;background:${bg};color:${color};text-align:center;">${v === null ? '?' : v}</td>`;
+                    html += `<td style="padding:8px;background:${bg};color:${color};text-align:center; font-family:monospace;">${v === null ? '?' : v}</td>`;
                 }
                 html += '</tr>';
             }
-            html += '</table>';
+            
+            // Show "..." indicator if there are hidden rows below
+            if (scrollOffset + MAX_VISIBLE_ROWS < totalRows) {
+                html += '<tr><td colspan="' + (numCols + 1) + '" style="text-align:center; padding:4px; background:#f0f0f0; color:#666; font-size:14px;">&#x22EE;</td></tr>';
+            }
+            
+            html += '</table></div>';
             document.getElementById('memory').innerHTML = html;
             
             // Render instructions
@@ -465,6 +487,8 @@
             // Set activated rows for current instruction before executing
             if (pc < program.instrs.length) {
                 activatedRows = getActivatedRows(program.instrs[pc]);
+                // Auto-scroll to show activated rows
+                autoScrollToActivatedRows();
             } else {
                 activatedRows = new Set();
             }
@@ -518,15 +542,49 @@
             registers['C1'] = new Array(numCols).fill(1);
             
             while (pc < n) stepInstruction();
-            
+
             // Set activated rows for the instruction at position n
             if (pc < program.instrs.length) {
                 activatedRows = getActivatedRows(program.instrs[pc]);
+                // Auto-scroll to show activated rows
+                autoScrollToActivatedRows();
             } else {
                 activatedRows = new Set();
             }
-            
+
             render();
+        }
+
+        // Auto-scroll to make activated rows visible
+        function autoScrollToActivatedRows() {
+            if (activatedRows.size === 0) return;
+
+            const regNames = sortRowNames(Object.keys(registers));
+            const activatedIndices = [];
+
+            for (const row of activatedRows) {
+                const idx = regNames.indexOf(row);
+                if (idx !== -1) {
+                    activatedIndices.push(idx);
+                }
+            }
+
+            if (activatedIndices.length === 0) return;
+
+            const minIdx = Math.min(...activatedIndices);
+            const maxIdx = Math.max(...activatedIndices);
+
+            // Ensure the activated rows are in view
+            if (maxIdx >= scrollOffset + MAX_VISIBLE_ROWS) {
+                scrollOffset = maxIdx - MAX_VISIBLE_ROWS + 1;
+            }
+            if (minIdx < scrollOffset) {
+                scrollOffset = minIdx;
+            }
+
+            // Clamp scroll offset
+            const maxScroll = Math.max(0, regNames.length - MAX_VISIBLE_ROWS);
+            scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
         }
         
         // Extract row names activated by an instruction
@@ -551,6 +609,47 @@
                 }
             }
             return rows;
+        }
+
+        // Extract all row names referenced in a program
+        function getAllRowNames(program) {
+            const rows = new Set();
+            rows.add('C0');
+            rows.add('C1');
+            
+            for (const instr of program.instrs) {
+                const activated = getActivatedRows(instr);
+                for (const row of activated) {
+                    rows.add(row);
+                }
+            }
+            return rows;
+        }
+
+        // Parse row name to get type and index for sorting
+        function parseRowName(name) {
+            const match = name.match(/^([A-Z]+)(\d+)$/);
+            if (!match) return { type: name, index: 0 };
+            return { type: match[1], index: parseInt(match[2]) };
+        }
+
+        // Sort rows by type priority and index
+        function sortRowNames(names) {
+            const typeOrder = { 'I': 0, 'O': 1, 'C': 2, 'T': 3, 'S': 4, 'DCC': 5 };
+            return Array.from(names).sort((a, b) => {
+                const pa = parseRowName(a);
+                const pb = parseRowName(b);
+                const orderA = typeOrder[pa.type] ?? 6;
+                const orderB = typeOrder[pb.type] ?? 6;
+                if (orderA !== orderB) return orderA - orderB;
+                return pa.index - pb.index;
+            });
+        }
+
+        // Scroll through rows
+        function scrollRows(delta) {
+            scrollOffset += delta;
+            render();
         }
 
         // Initialize on load
