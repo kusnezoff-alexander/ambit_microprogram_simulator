@@ -83,6 +83,7 @@
         let registers = {};
         let bitWidth = 4;
         let activatedRows = new Set();  // Rows activated by current instruction
+        let previousRows = new Set();  // Rows from previous instruction (shown dimmed)
         let scrollOffset = 0;  // Scroll position for row window
         const MAX_VISIBLE_ROWS = 16;  // Maximum rows to show at once
         
@@ -255,8 +256,9 @@
             document.getElementById('runBtn').disabled = false;
             document.getElementById('resetBtn').disabled = false;
 
-            // Clear activated rows and scroll on load
+            // Clear activated/previous rows and scroll on load
             activatedRows = new Set();
+            previousRows = new Set();
             scrollOffset = 0;
 
 
@@ -285,7 +287,10 @@
                 }
             }
             
-            if (activatedRows.size === 0 || totalRows <= MAX_VISIBLE_ROWS) {
+            // Combine activated + previous rows for visibility check
+            const allRelevantRows = new Set([...activatedRows, ...previousRows]);
+            
+            if (allRelevantRows.size === 0 || totalRows <= MAX_VISIBLE_ROWS) {
                 // No active instruction or small program: show windowed view
                 const maxScroll = Math.max(0, totalRows - MAX_VISIBLE_ROWS);
                 scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
@@ -293,8 +298,8 @@
                     rowIndicesToShow.add(i);
                 }
             } else {
-                // Show activated rows with context
-                for (const row of activatedRows) {
+                // Show activated + previous rows with context
+                for (const row of allRelevantRows) {
                     const idx = allRegNames.indexOf(row);
                     if (idx === -1) continue;
                     for (let i = Math.max(0, idx - CONTEXT); i <= Math.min(totalRows - 1, idx + CONTEXT); i++) {
@@ -348,8 +353,15 @@
                 }
                 
                 const isActivated = activatedRows.has(reg);
-                const rowBg = isActivated ? '#fff3cd' : '#e7f3ff';
-                const rowBorder = isActivated ? 'border-left: 4px solid #ffc107;' : '';
+                const isPrevious = previousRows.has(reg) && !isActivated;
+                let rowBg, rowBorder;
+                if (isActivated) {
+                    rowBg = '#fff3cd'; rowBorder = 'border-left: 4px solid #ffc107;';
+                } else if (isPrevious) {
+                    rowBg = '#e8f4fd'; rowBorder = 'border-left: 4px solid #17a2b8;';
+                } else {
+                    rowBg = '#e7f3ff'; rowBorder = '';
+                }
                 html += `<tr style="${rowBorder}"><td style="padding:8px;background:${rowBg};font-weight:bold; font-family:monospace;">${reg}</td>`;
                 for (let c = 0; c < numCols; c++) {
                     const v = vals[c];
@@ -357,6 +369,8 @@
                     const color = v === 1 ? '#28a745' : v === 0 ? '#dc3545' : '#333';
                     if (isActivated) {
                         bg = v === 1 ? '#c3e6cb' : v === 0 ? '#f5c6cb' : '#e9ecef';
+                    } else if (isPrevious) {
+                        bg = v === 1 ? '#c8e6c9' : v === 0 ? '#f5c6cb' : '#e0e0e0';
                     }
                     html += `<td style="padding:8px;background:${bg};color:${color};text-align:center; font-family:monospace;">${v === null ? '?' : v}</td>`;
                 }
@@ -528,6 +542,8 @@
         }
         
         function step() {
+            // Save current activated rows as previous before moving on
+            previousRows = new Set(activatedRows);
             // Set activated rows for current instruction BEFORE executing
             if (pc < program.instrs.length) {
                 const instr = program.instrs[pc];
@@ -541,10 +557,12 @@
         
         function runAll() {
             while (pc < program.instrs.length) {
+                previousRows = new Set(activatedRows);
                 activatedRows = getActivatedRows(program.instrs[pc]);
                 stepInstruction();
             }
             pc = program.instrs.length;
+            previousRows = new Set(activatedRows);
             activatedRows = new Set();
             render();
         }
