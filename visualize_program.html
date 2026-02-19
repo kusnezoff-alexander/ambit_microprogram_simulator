@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AMBIT Visualizer</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; max-width: 1200px; margin: 0 auto; }
+        h1 { color: #333; border-bottom: 2px solid #007bff; }
+        .controls { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:disabled { background: #ccc; }
+        select, input { padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .panel { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .memory-array { display: flex; gap: 4px; margin-top: 20px; }
+        .column { display: flex; flex-direction: column; gap: 2px; }
+        .cell { padding: 8px 12px; text-align: center; font-family: monospace; background: #f5f5f5; border: 1px solid #ddd; min-width: 60px; }
+        .cell.one { background: #d4edda; color: #28a745; }
+        .cell.zero { background: #f8d7da; color: #dc3545; }
+        .row-label { font-weight: bold; padding: 8px; background: #e7f3ff; text-align: center; }
+        .header-cell { background: #007bff; color: white; font-weight: bold; }
+        .instr-list { max-height: 300px; overflow-y: auto; }
+        .instr { padding: 8px; margin: 4px 0; background: #f5f5f5; font-family: monospace; font-size: 12px; }
+        .instr.current { background: #fff3cd; border-left: 3px solid #ffc107; }
+        .instr.past { background: #d4edda; border-left: 3px solid #28a745; }
+    </style>
+</head>
+<body>
+    <h1>AMBIT Microprogram Visualizer</h1>
+    
+    <div class="controls">
+        <div style="display:flex; gap:20px; align-items:flex-end; flex-wrap:wrap;">
+            <div>
+                <label>Program:</label><br>
+                <select id="program">
+                    <option value="">-- Select --</option>
+                    <option value="abs4">abs4 (4-bit)</option>
+                    <option value="abs8">abs8 (8-bit)</option>
+                    <option value="abs16">abs16 (16-bit)</option>
+                    <option value="abs32">abs32 (32-bit)</option>
+                    <option value="abs64">abs64 (64-bit)</option>
+                    <option value="bitcount4">bitcount4 (4-bit)</option>
+                    <option value="bitcount8">bitcount8 (8-bit)</option>
+                    <option value="bitcount16">bitcount16 (16-bit)</option>
+                    <option value="bitcount32">bitcount32 (32-bit)</option>
+                    <option value="bitcount64">bitcount64 (64-bit)</option>
+                </select>
+            </div>
+            <div>
+                <label>Input:</label><br>
+                <input type="number" id="inputVal" value="5" min="0">
+            </div>
+            <button id="loadBtn" onclick="loadProgram()">Load</button>
+        </div>
+        <div style="margin-top:15px; display:flex; gap:10px;">
+            <button id="stepBtn" onclick="step()" disabled>Step</button>
+            <button id="runBtn" onclick="runAll()" disabled>Run All</button>
+            <button id="resetBtn" onclick="reset()" disabled>Reset</button>
+            <span id="counter" style="padding:10px;">-- / --</span>
+        </div>
+    </div>
+
+    <div id="main" style="display:none;">
+        <div class="panel">
+            <h2>DRAM Array (Vertical Layout)</h2>
+            <div id="memory" class="memory-array"></div>
+        </div>
+        
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+            <div class="panel">
+                <h2>Instructions</h2>
+                <div id="instructions" class="instr-list"></div>
+            </div>
+            <div class="panel">
+                <h2>Result</h2>
+                <div id="result"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let program = null;
+        let step = 0;
+        let registers = {};
+        let bitWidth = 4;
+        
+        // Programs embedded directly
+        const programs = {};
+        
+        // Load all programs on page load
+        async function init() {
+            const names = ['abs4','abs8','abs16','abs32','abs64','bitcount4','bitcount8','bitcount16','bitcount32','bitcount64'];
+            for (const name of names) {
+                try {
+                    const resp = await fetch(name + '.txt');
+                    if (resp.ok) {
+                        programs[name] = parseProgram(await resp.text());
+                        console.log('Loaded:', name);
+                    }
+                } catch(e) {
+                    console.log('Error loading', name, e);
+                }
+            }
+            console.log('Init complete. Programs:', Object.keys(programs));
+        }
+        
+        function parseProgram(text) {
+            const lines = text.trim().split('\n');
+            const instrs = [];
+            const inputs = new Set();
+            const outputs = new Set();
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                const m = line.match(/^(AAP|AP)\s+(.*)$/);
+                if (m) {
+                    const args = m[2].split(/\s+/);
+                    instrs.push({type: m[1], args: args});
+                    for (const a of args) {
+                        const c = a.replace(/[~\[\]]/g, '');
+                        if (c.startsWith('I')) try { inputs.add(parseInt(c.slice(1))); } catch {}
+                        if (c.startsWith('O')) try { outputs.add(parseInt(c.slice(1))); } catch {}
+                    }
+                }
+            }
+            return { instrs, inputs: inputs.size, outputs: outputs.size };
+        }
+        
+        function loadProgram() {
+            const name = document.getElementById('program').value;
+            const inputVal = parseInt(document.getElementById('inputVal').value) || 0;
+            
+            if (!name || !programs[name]) {
+                alert('Program not loaded: ' + name);
+                return;
+            }
+            
+            program = programs[name];
+            step = 0;
+            
+            // Determine bitwidth from name
+            bitWidth = name.startsWith('abs') ? parseInt(name.slice(3)) : parseInt(name.slice(8));
+            const numCols = Math.min(8, bitWidth);
+            
+            // Initialize registers as arrays
+            registers = {};
+            
+            // Inputs: each input is an array of bits
+            for (let i = 0; i < program.inputs; i++) {
+                registers['I' + i] = [];
+                for (let c = 0; c < numCols; c++) {
+                    registers['I' + i].push((inputVal >> c) & 1);
+                }
+            }
+            
+            // Outputs: arrays of null initially
+            for (let i = 0; i < program.outputs; i++) {
+                registers['O' + i] = new Array(numCols).fill(null);
+            }
+            
+            // Constants
+            registers['C0'] = new Array(numCols).fill(0);
+            registers['C1'] = new Array(numCols).fill(1);
+            
+            // Show main area
+            document.getElementById('main').style.display = 'block';
+            document.getElementById('stepBtn').disabled = false;
+            document.getElementById('runBtn').disabled = false;
+            document.getElementById('resetBtn').disabled = false;
+            
+            render();
+        }
+        
+        function render() {
+            // Render memory array
+            const numCols = Math.min(8, bitWidth);
+            let html = '<div class="column"><div class="header-cell cell">Row</div></div>';
+            
+            // Get active registers
+            const regNames = Object.keys(registers).sort((a,b) => {
+                const order = {'I':0,'O':1,'C':2,'T':3,'S':4,'DCC':5};
+                const at = a.match(/^[A-Z]+/)?.[0] || '';
+                const bt = b.match(/^[A-Z]+/)?.[0] || '';
+                return (order[at]??6) - (order[bt]??6) || (parseInt(a.slice(1))||0) - (parseInt(b.slice(1))||0);
+            });
+            
+            // Column headers
+            for (let c = 0; c < numCols; c++) {
+                html += `<div class="column"><div class="header-cell cell">Col ${c}</div></div>`;
+            }
+            
+            // Rows
+            for (const reg of regNames) {
+                const vals = registers[reg];
+                if (!vals) continue;
+                html += `<div class="column"><div class="row-label">${reg}</div></div>`;
+                for (let c = 0; c < numCols; c++) {
+                    const v = vals[c];
+                    const cls = v === 1 ? 'one' : v === 0 ? 'zero' : '';
+                    html += `<div class="column"><div class="cell ${cls}">${v === null ? '?' : v}</div></div>`;
+                }
+            }
+            document.getElementById('memory').innerHTML = html;
+            
+            // Render instructions
+            let instrHtml = '';
+            for (let i = 0; i < program.instrs.length; i++) {
+                const instr = program.instrs[i];
+                let cls = 'instr';
+                if (i < step) cls += ' past';
+                if (i === step) cls += ' current';
+                instrHtml += `<div class="${cls}" onclick="jumpTo(${i})">${instr.type} ${instr.args.join(' ')}</div>`;
+            }
+            document.getElementById('instructions').innerHTML = instrHtml;
+            document.getElementById('counter').textContent = `${step} / ${program.instrs.length}`;
+            
+            // Render result
+            let outputVal = 0;
+            for (let i = 0; i < program.outputs; i++) {
+                const vals = registers['O' + i];
+                if (vals) {
+                    for (let c = 0; c < vals.length; c++) {
+                        if (vals[c] === 1) outputVal |= (1 << c);
+                    }
+                }
+            }
+            
+            const inputVal = parseInt(document.getElementById('inputVal').value) || 0;
+            let expected;
+            if (document.getElementById('program').value.startsWith('abs')) {
+                const maxSigned = 1 << (bitWidth - 1);
+                const signed = inputVal >= maxSigned ? inputVal - (1 << bitWidth) : inputVal;
+                expected = Math.abs(signed);
+            } else {
+                expected = inputVal.toString(2).split('1').length - 1;
+            }
+            
+            const isDone = step >= program.instrs.length;
+            let resultHtml = `Input: ${inputVal} (${bitWidth}-bit)<br>Output: ${outputVal}<br>Expected: ${expected}`;
+            if (isDone) {
+                if (outputVal === expected) {
+                    resultHtml += '<br><span style="color:green;font-weight:bold;">✓ CORRECT</span>';
+                } else {
+                    resultHtml += '<br><span style="color:red;font-weight:bold;">✗ WRONG</span>';
+                }
+            }
+            document.getElementById('result').innerHTML = resultHtml;
+            
+            // Scroll to current instruction
+            const current = document.querySelector('.instr.current');
+            if (current) current.scrollIntoView({behavior:'smooth',block:'center'});
+        }
+        
+        function stepInstruction() {
+            if (step >= program.instrs.length) return;
+            
+            const instr = program.instrs[step];
+            const numCols = Math.min(8, bitWidth);
+            
+            if (instr.type === 'AAP') {
+                // Parse: AAP src1 src2 ... [T0,T1,T2] dest
+                // Or: AAP [T0,T1,T2] dest
+                // Or: AAP src dest
+                
+                let dest = null;
+                let majorityArgs = [];
+                
+                // Find bracketed (majority) or last arg (dest)
+                for (const arg of instr.args) {
+                    if (arg.startsWith('[') && arg.endsWith(']')) {
+                        majorityArgs = arg.slice(1,-1).split(',').map(s=>s.trim());
+                    } else if (!dest && !arg.startsWith('[')) {
+                        dest = arg;
+                    }
+                }
+                
+                // Execute for each column
+                for (let c = 0; c < numCols; c++) {
+                    let result;
+                    if (majorityArgs.length >= 3) {
+                        const a = getReg(majorityArgs[0], c);
+                        const b = getReg(majorityArgs[1], c);
+                        const cc = getReg(majorityArgs[2], c);
+                        result = (a & b) | (a & cc) | (b & cc);
+                    } else {
+                        // Get first source
+                        const src = instr.args.find(a => !a.startsWith('[') && !a.startsWith('C'));
+                        result = src ? getReg(src, c) : 0;
+                    }
+                    
+                    if (dest) setReg(dest, c, result);
+                }
+            }
+            
+            step++;
+        }
+        
+        function getReg(reg, col) {
+            let neg = false;
+            if (reg.startsWith('~')) { reg = reg.slice(1); neg = true; }
+            if (!registers[reg]) registers[reg] = new Array(8).fill(0);
+            let v = registers[reg][col];
+            if (v === undefined || v === null) v = 0;
+            return neg ? 1 - v : v;
+        }
+        
+        function setReg(reg, col, val) {
+            if (!registers[reg]) registers[reg] = new Array(8).fill(null);
+            let neg = false;
+            if (reg.startsWith('~')) { reg = reg.slice(1); neg = true; }
+            registers[reg][col] = neg ? 1 - val : val;
+        }
+        
+        function step() {
+            stepInstruction();
+            render();
+        }
+        
+        function runAll() {
+            while (step < program.instrs.length) stepInstruction();
+            step = program.instrs.length;
+            render();
+        }
+        
+        function reset() {
+            loadProgram();
+        }
+        
+        function jumpTo(n) {
+            // Reload and step to n
+            const name = document.getElementById('program').value;
+            const inputVal = parseInt(document.getElementById('inputVal').value) || 0;
+            if (!program) return;
+            
+            step = 0;
+            bitWidth = name.startsWith('abs') ? parseInt(name.slice(3)) : parseInt(name.slice(8));
+            const numCols = Math.min(8, bitWidth);
+            
+            registers = {};
+            for (let i = 0; i < program.inputs; i++) {
+                registers['I' + i] = [];
+                for (let c = 0; c < numCols; c++) {
+                    registers['I' + i].push((inputVal >> c) & 1);
+                }
+            }
+            for (let i = 0; i < program.outputs; i++) {
+                registers['O' + i] = new Array(numCols).fill(null);
+            }
+            registers['C0'] = new Array(numCols).fill(0);
+            registers['C1'] = new Array(numCols).fill(1);
+            
+            while (step < n) stepInstruction();
+            render();
+        }
+        
+        // Initialize on load
+        init();
+    </script>
+</body>
+</html>
