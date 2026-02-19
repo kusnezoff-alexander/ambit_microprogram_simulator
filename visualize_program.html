@@ -218,30 +218,29 @@
             // Initialize registers as arrays
             registers = {};
             
-            // VERTICAL LAYOUT: Each bit position is a separate row
-            // For 4-bit abs: I0=bit0, I1=bit1, I2=bit2, I3=bit3
-            // Each row has the same bit value across all columns
+            // PACKED VERTICAL LAYOUT: Each column holds one operand
+            // For input [5,1,2,3] with 4-bit abs:
+            // I0 = [bit0(5), bit0(1), bit0(2), bit0(3), 0, 0, 0, 0] = [1, 1, 0, 1, 0, 0, 0, 0]
+            // I1 = [bit1(5), bit1(1), bit1(2), bit1(3), 0, 0, 0, 0] = [0, 0, 1, 1, 0, 0, 0, 0]
+            // etc.
             const inputArray = Array.isArray(inputData) ? inputData : [inputData];
             
-            // Inputs: Each input operand spans multiple rows (I0, I1, I2, I3 for 4-bit)
-            // Input 0 uses rows I0, I1, I2, I3
-            // Input 1 would use rows I4, I5, I6, I7, etc.
-            for (let inputIdx = 0; inputIdx < program.inputs; inputIdx++) {
-                const val = inputArray[inputIdx] || 0;
-                // Each bit of the value goes into a different row
-                for (let bitPos = 0; bitPos < bitWidth; bitPos++) {
-                    const rowName = 'I' + (inputIdx * bitWidth + bitPos);
-                    const bitVal = (val >> bitPos) & 1;
-                    registers[rowName] = new Array(numCols).fill(bitVal);
+            // Each row contains the same bit position across all input operands
+            // Only need rows I0-I(bitWidth-1) since the program processes one input at a time
+            for (let bitPos = 0; bitPos < bitWidth; bitPos++) {
+                const rowName = 'I' + bitPos;
+                registers[rowName] = new Array(numCols).fill(0);
+                // Fill columns with bits from each input value
+                for (let col = 0; col < inputArray.length && col < numCols; col++) {
+                    const val = inputArray[col] || 0;
+                    registers[rowName][col] = (val >> bitPos) & 1;
                 }
             }
             
-            // Outputs: Each output spans multiple rows (O0, O1, O2, O3 for 4-bit)
-            for (let outIdx = 0; outIdx < program.outputs; outIdx++) {
-                for (let bitPos = 0; bitPos < bitWidth; bitPos++) {
-                    const rowName = 'O' + (outIdx * bitWidth + bitPos);
-                    registers[rowName] = new Array(numCols).fill(null);
-                }
+            // Outputs: Each row contains same bit position across all outputs
+            for (let bitPos = 0; bitPos < bitWidth; bitPos++) {
+                const rowName = 'O' + bitPos;
+                registers[rowName] = new Array(numCols).fill(null);
             }
             
             // Constants - exist at row C0 and C1
@@ -309,15 +308,15 @@
             document.getElementById('instructions').innerHTML = instrHtml;
             document.getElementById('counter').textContent = `${pc} / ${program.instrs.length}`;
             
-            // Render result - reconstruct from vertical layout
-            // Output spans multiple rows (O0-O3 for 4-bit output 0)
+            // Render result - reconstruct from packed vertical layout
+            // Each column has an output value, combine bit rows for each column
             let outputVals = [];
-            for (let outIdx = 0; outIdx < program.outputs / bitWidth; outIdx++) {
+            for (let col = 0; col < numCols; col++) {
                 let outVal = 0;
                 for (let bitPos = 0; bitPos < bitWidth; bitPos++) {
-                    const rowName = 'O' + (outIdx * bitWidth + bitPos);
+                    const rowName = 'O' + bitPos;
                     const vals = registers[rowName];
-                    if (vals && vals[0] === 1) {  // Use first column as representative
+                    if (vals && vals[col] === 1) {
                         outVal |= (1 << bitPos);
                     }
                 }
@@ -330,18 +329,33 @@
             
             let expected = 'N/A';
             let correct = false;
-            
-            if (!isArrayInput && pc >= program.instrs.length) {
+
+            if (isArrayInput && pc >= program.instrs.length) {
+                // For array input, check all outputs
+                if (document.getElementById('program').value.startsWith('abs')) {
+                    const maxSigned = 1 << (bitWidth - 1);
+                    const mask = (1 << bitWidth) - 1;
+                    let allCorrect = true;
+                    expected = [];
+                    for (let i = 0; i < inputArray.length; i++) {
+                        const val = inputArray[i];
+                        const signed = val >= maxSigned ? val - (1 << bitWidth) : val;
+                        const exp = Math.abs(signed) & mask;
+                        expected.push(exp);
+                        if (outputVals[i] !== exp) allCorrect = false;
+                    }
+                    correct = allCorrect;
+                }
+            } else if (!isArrayInput && pc >= program.instrs.length) {
                 if (document.getElementById('program').value.startsWith('abs')) {
                     const maxSigned = 1 << (bitWidth - 1);
                     const signed = inputData >= maxSigned ? inputData - (1 << bitWidth) : inputData;
-                    expected = Math.abs(signed);
-                    // Mask to bitWidth bits
-                    expected = expected & ((1 << bitWidth) - 1);
+                    expected = Math.abs(signed) & ((1 << bitWidth) - 1);
+                    correct = outputVals[0] === expected;
                 } else {
                     expected = inputData.toString(2).split('1').length - 1;
+                    correct = outputVals[0] === expected;
                 }
-                correct = outputVals[0] === expected;
             }
             
             const isDone = pc >= program.instrs.length;
@@ -463,23 +477,21 @@
             registers = {};
             const inputArray = Array.isArray(inputData) ? inputData : [inputData];
             
-            // Re-initialize with vertical layout
-            for (let inputIdx = 0; inputIdx < program.inputs / bitWidth; inputIdx++) {
-                const val = inputArray[inputIdx] || 0;
-                for (let bitPos = 0; bitPos < bitWidth; bitPos++) {
-                    const rowName = 'I' + (inputIdx * bitWidth + bitPos);
-                    const bitVal = (val >> bitPos) & 1;
-                    registers[rowName] = new Array(numCols).fill(bitVal);
+            // Re-initialize with packed layout
+            for (let bitPos = 0; bitPos < bitWidth; bitPos++) {
+                const rowName = 'I' + bitPos;
+                registers[rowName] = new Array(numCols).fill(0);
+                for (let col = 0; col < inputArray.length && col < numCols; col++) {
+                    const val = inputArray[col] || 0;
+                    registers[rowName][col] = (val >> bitPos) & 1;
                 }
             }
-            
-            for (let outIdx = 0; outIdx < program.outputs / bitWidth; outIdx++) {
-                for (let bitPos = 0; bitPos < bitWidth; bitPos++) {
-                    const rowName = 'O' + (outIdx * bitWidth + bitPos);
-                    registers[rowName] = new Array(numCols).fill(null);
-                }
+
+            for (let bitPos = 0; bitPos < bitWidth; bitPos++) {
+                const rowName = 'O' + bitPos;
+                registers[rowName] = new Array(numCols).fill(null);
             }
-            
+
             registers['C0'] = new Array(numCols).fill(0);
             registers['C1'] = new Array(numCols).fill(1);
             
