@@ -115,9 +115,21 @@
                     const args = m[2].split(/\s+/);
                     instrs.push({type: m[1], args: args});
                     for (const a of args) {
-                        const c = a.replace(/[~\[\]]/g, '');
-                        if (c.startsWith('I')) try { inputs.add(parseInt(c.slice(1))); } catch {}
-                        if (c.startsWith('O')) try { outputs.add(parseInt(c.slice(1))); } catch {}
+                        // Handle bracketed args like [T0,T1,T2]
+                        const clean = a.replace(/[~\[\]]/g, '');
+                        // Split by comma for bracket contents
+                        const parts = clean.split(',');
+                        for (const part of parts) {
+                            const c = part.trim();
+                            if (c.startsWith('I')) {
+                                const num = parseInt(c.slice(1));
+                                if (!isNaN(num)) inputs.add(num);
+                            }
+                            if (c.startsWith('O')) {
+                                const num = parseInt(c.slice(1));
+                                if (!isNaN(num)) outputs.add(num);
+                            }
+                        }
                     }
                 }
             }
@@ -314,19 +326,27 @@
             const numCols = Math.min(8, bitWidth);
             
             if (instr.type === 'AAP') {
-                // Parse: AAP src1 src2 ... [T0,T1,T2] dest
-                // Or: AAP [T0,T1,T2] dest
-                // Or: AAP src dest
+                // AAP can be:
+                // AAP src dest (copy)
+                // AAP [T0,T1,T2] dest (MAJ3 to dest)
+                // AAP src [T0,T1,T2] (MAJ3 with src as one input)
                 
                 let dest = null;
                 let majorityArgs = [];
+                let srcArg = null;
                 
-                // Find bracketed (majority) or last arg (dest)
-                for (const arg of instr.args) {
+                // Find bracketed args and destination
+                for (let i = 0; i < instr.args.length; i++) {
+                    const arg = instr.args[i];
                     if (arg.startsWith('[') && arg.endsWith(']')) {
                         majorityArgs = arg.slice(1,-1).split(',').map(s=>s.trim());
-                    } else if (!dest && !arg.startsWith('[')) {
-                        dest = arg;
+                    } else if (!dest) {
+                        // First non-bracketed could be source or dest
+                        if (i === instr.args.length - 1) {
+                            dest = arg;  // Last arg is destination
+                        } else {
+                            srcArg = arg;  // Not last, so it's a source
+                        }
                     }
                 }
                 
@@ -334,17 +354,44 @@
                 for (let c = 0; c < numCols; c++) {
                     let result;
                     if (majorityArgs.length >= 3) {
+                        // MAJ3 operation
                         const a = getReg(majorityArgs[0], c);
                         const b = getReg(majorityArgs[1], c);
                         const cc = getReg(majorityArgs[2], c);
                         result = (a & b) | (a & cc) | (b & cc);
+                    } else if (srcArg) {
+                        // Simple copy
+                        result = getReg(srcArg, c);
                     } else {
-                        // Get first source
-                        const src = instr.args.find(a => !a.startsWith('[') && !a.startsWith('C'));
-                        result = src ? getReg(src, c) : 0;
+                        result = 0;
                     }
                     
                     if (dest) setReg(dest, c, result);
+                }
+            } else if (instr.type === 'AP') {
+                // AP always does MAJ3: AP [T0,T1,T2] or AP [DCC0,T1,T2]
+                // The result goes to a temporary or designated register
+                // Parse all args as majority inputs
+                
+                let majorityArgs = [];
+                for (const arg of instr.args) {
+                    if (arg.startsWith('[') && arg.endsWith(']')) {
+                        majorityArgs = arg.slice(1,-1).split(',').map(s=>s.trim());
+                    }
+                }
+                
+                if (majorityArgs.length >= 3) {
+                    // Execute MAJ3 for each column - result stored in first arg's register
+                    // This is a compute operation, result typically goes to DCC or temp
+                    for (let c = 0; c < numCols; c++) {
+                        const a = getReg(majorityArgs[0], c);
+                        const b = getReg(majorityArgs[1], c);
+                        const cc = getReg(majorityArgs[2], c);
+                        const result = (a & b) | (a & cc) | (b & cc);
+                        
+                        // Store in first operand's register (typical AMBIT behavior)
+                        setReg(majorityArgs[0], c, result);
+                    }
                 }
             }
             
@@ -400,7 +447,6 @@
                 for (let c = 0; c < numCols; c++) {
                     registers['I' + i].push((val >> c) & 1);
                 }
-            }
             }
             for (let i = 0; i < program.outputs; i++) {
                 registers['O' + i] = new Array(numCols).fill(null);
