@@ -82,6 +82,7 @@
         let pc = 0;
         let registers = {};
         let bitWidth = 4;
+        let activatedRows = new Set();  // Rows activated by current instruction
         
         // Programs embedded directly
         const programs = {};
@@ -252,9 +253,12 @@
             document.getElementById('stepBtn').disabled = false;
             document.getElementById('runBtn').disabled = false;
             document.getElementById('resetBtn').disabled = false;
-            
+
+            // Clear activated rows on load
+            activatedRows = new Set();
+
             console.log('Initialized registers:', Object.keys(registers));
-            
+
             render();
         }
         
@@ -284,11 +288,19 @@
             for (const reg of regNames) {
                 const vals = registers[reg];
                 if (!vals) continue;
-                html += `<tr><td style="padding:8px;background:#e7f3ff;font-weight:bold;">${reg}</td>`;
+                // Highlight activated rows with yellow background
+                const isActivated = activatedRows.has(reg);
+                const rowBg = isActivated ? '#fff3cd' : '#e7f3ff';
+                const rowBorder = isActivated ? 'border-left: 4px solid #ffc107;' : '';
+                html += `<tr style="${rowBorder}"><td style="padding:8px;background:${rowBg};font-weight:bold;">${reg}</td>`;
                 for (let c = 0; c < numCols; c++) {
                     const v = vals[c];
-                    const bg = v === 1 ? '#d4edda' : v === 0 ? '#f8d7da' : '#f5f5f5';
+                    let bg = v === 1 ? '#d4edda' : v === 0 ? '#f8d7da' : '#f5f5f5';
                     const color = v === 1 ? '#28a745' : v === 0 ? '#dc3545' : '#333';
+                    // Darken activated row cells slightly
+                    if (isActivated) {
+                        bg = v === 1 ? '#c3e6cb' : v === 0 ? '#f5c6cb' : '#e9ecef';
+                    }
                     html += `<td style="padding:8px;background:${bg};color:${color};text-align:center;">${v === null ? '?' : v}</td>`;
                 }
                 html += '</tr>';
@@ -450,13 +462,23 @@
         }
         
         function step() {
+            // Set activated rows for current instruction before executing
+            if (pc < program.instrs.length) {
+                activatedRows = getActivatedRows(program.instrs[pc]);
+            } else {
+                activatedRows = new Set();
+            }
             stepInstruction();
             render();
         }
         
         function runAll() {
-            while (pc < program.instrs.length) stepInstruction();
+            while (pc < program.instrs.length) {
+                activatedRows = getActivatedRows(program.instrs[pc]);
+                stepInstruction();
+            }
             pc = program.instrs.length;
+            activatedRows = new Set();
             render();
         }
         
@@ -496,9 +518,41 @@
             registers['C1'] = new Array(numCols).fill(1);
             
             while (pc < n) stepInstruction();
+            
+            // Set activated rows for the instruction at position n
+            if (pc < program.instrs.length) {
+                activatedRows = getActivatedRows(program.instrs[pc]);
+            } else {
+                activatedRows = new Set();
+            }
+            
             render();
         }
         
+        // Extract row names activated by an instruction
+        function getActivatedRows(instr) {
+            const rows = new Set();
+            if (!instr) return rows;
+            
+            for (const arg of instr.args) {
+                // Handle bracketed args like [T0, T1, T2]
+                if (arg.startsWith('[') && arg.endsWith(']')) {
+                    const inner = arg.slice(1, -1);
+                    const parts = inner.split(',').map(s => s.trim());
+                    for (const part of parts) {
+                        // Strip ~ prefix if present
+                        const clean = part.replace(/^~/, '');
+                        if (clean) rows.add(clean);
+                    }
+                } else {
+                    // Strip ~ prefix if present
+                    const clean = arg.replace(/^~/, '');
+                    if (clean) rows.add(clean);
+                }
+            }
+            return rows;
+        }
+
         // Initialize on load
         init();
     </script>
