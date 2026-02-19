@@ -229,6 +229,7 @@
             const allRows = getAllRowNames(program);
             
             // Initialize ALL rows upfront (not just inputs/outputs)
+            console.log('All rows from program:', Array.from(allRows).sort());
             for (const rowName of allRows) {
                 if (rowName.startsWith('I')) {
                     // Input row
@@ -486,7 +487,9 @@
         function step() {
             // Set activated rows for current instruction before executing
             if (pc < program.instrs.length) {
-                activatedRows = getActivatedRows(program.instrs[pc]);
+                const instr = program.instrs[pc];
+                activatedRows = getActivatedRows(instr);
+                console.log('Step', pc, ':', instr.type, instr.args, '-> activated:', Array.from(activatedRows));
                 // Auto-scroll to show activated rows
                 autoScrollToActivatedRows();
             } else {
@@ -591,7 +594,7 @@
         function getActivatedRows(instr) {
             const rows = new Set();
             if (!instr) return rows;
-            
+
             for (const arg of instr.args) {
                 // Handle bracketed args like [T0, T1, T2]
                 if (arg.startsWith('[') && arg.endsWith(']')) {
@@ -608,6 +611,7 @@
                     if (clean) rows.add(clean);
                 }
             }
+
             return rows;
         }
 
