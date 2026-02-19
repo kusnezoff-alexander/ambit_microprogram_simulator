@@ -599,7 +599,13 @@
             const rows = new Set();
             if (!instr) return rows;
 
-            for (const arg of instr.args) {
+            // DEBUG: Log the instruction being processed
+            if (instr.args.some(a => a.includes('S2') || a.includes('S10'))) {
+                console.log('getActivatedRows called with:', instr);
+            }
+
+            for (let i = 0; i < instr.args.length; i++) {
+                const arg = instr.args[i];
                 // Handle bracketed args like [T0, T1, T2]
                 if (arg.startsWith('[') && arg.endsWith(']')) {
                     const inner = arg.slice(1, -1);
@@ -612,7 +618,9 @@
                 } else {
                     // Strip ~ prefix if present
                     const clean = arg.replace(/^~/, '');
-                    if (clean) rows.add(clean);
+                    if (clean) {
+                        rows.add(clean);
+                    }
                 }
             }
 
