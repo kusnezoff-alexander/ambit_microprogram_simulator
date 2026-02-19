@@ -108,6 +108,9 @@
             if (programs['abs4']) {
                 console.log('abs4 program:', programs['abs4']);
                 console.log('abs4 outputs count:', programs['abs4'].outputs);
+                // Debug: Check specific instructions
+                const instr15 = programs['abs4'].instrs[14];  // 0-indexed, so 14 is line 15
+                console.log('Instruction 15:', instr15);
             }
         }
         
@@ -263,6 +266,7 @@
             scrollOffset = 0;
 
             console.log('Initialized registers:', Object.keys(registers));
+            console.log('Checking for S2:', registers['S2'] ? 'found' : 'missing');
 
             render();
         }
