@@ -112,15 +112,38 @@
                 if (!line.trim()) continue;
                 const m = line.match(/^(AAP|AP)\s+(.*)$/);
                 if (m) {
-                    const args = m[2].split(/\s+/);
+                    // Parse args handling bracketed expressions like [T0, T1, T2]
+                    const args = [];
+                    let rest = m[2];
+                    let current = '';
+                    let inBracket = false;
+                    for (let i = 0; i < rest.length; i++) {
+                        const ch = rest[i];
+                        if (ch === '[') {
+                            inBracket = true;
+                            current += ch;
+                        } else if (ch === ']') {
+                            inBracket = false;
+                            current += ch;
+                        } else if (ch === ' ' && !inBracket) {
+                            if (current) {
+                                args.push(current);
+                                current = '';
+                            }
+                        } else {
+                            current += ch;
+                        }
+                    }
+                    if (current) args.push(current);
+                    
                     instrs.push({type: m[1], args: args});
                     for (const a of args) {
                         // Handle bracketed args like [T0,T1,T2]
-                        const clean = a.replace(/[~\[\]]/g, '');
+                        const clean = a.replace(/[\[\]]/g, '');
                         // Split by comma for bracket contents
                         const parts = clean.split(',');
                         for (const part of parts) {
-                            const c = part.trim();
+                            const c = part.trim().replace(/^~/, '');  // Also strip negation
                             if (c.startsWith('I')) {
                                 const num = parseInt(c.slice(1));
                                 if (!isNaN(num)) inputs.add(num);
