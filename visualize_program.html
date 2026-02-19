@@ -101,6 +101,11 @@
                 }
             }
             console.log('Init complete. Programs:', Object.keys(programs));
+            // Debug: log the first program's parsed structure
+            if (programs['abs4']) {
+                console.log('abs4 program:', programs['abs4']);
+                console.log('abs4 outputs count:', programs['abs4'].outputs);
+            }
         }
         
         function parseProgram(text) {
@@ -204,6 +209,7 @@
             
             program = programs[name];
             pc = 0;
+            console.log('Loaded program:', name, 'inputs:', program.inputs, 'outputs:', program.outputs);
             
             // Determine bitwidth from name
             bitWidth = name.startsWith('abs') ? parseInt(name.slice(3)) : parseInt(name.slice(8));
@@ -237,6 +243,8 @@
             document.getElementById('stepBtn').disabled = false;
             document.getElementById('runBtn').disabled = false;
             document.getElementById('resetBtn').disabled = false;
+            
+            console.log('Initialized registers:', Object.keys(registers));
             
             render();
         }
