@@ -1,4 +1,4 @@
-# AMBIT Microprogram Simulator - Understanding
+# PIM Microprogram Simulator - Understanding
 
 ## Architecture Overview
 - **DRAM-based in-memory computing**: Operations activate DRAM rows to perform computation

@@ -1,6 +1,8 @@
-# AMBIT Microprogram Simulator
+# PIM Microprogram Simulator
 
 A web-based visualizer and verifier for AMBIT microprograms.
+
+- [ ] ReRAM: stateful logic (2) non-stateful)
 
 ## Files
 

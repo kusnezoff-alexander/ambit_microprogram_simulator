@@ -1,4 +1,4 @@
-# AMBIT Microprogram Simulator - Status Report
+# PIM Microprogram Simulator - Status Report
 
 ## Current Status
 

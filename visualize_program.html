@@ -24,29 +24,19 @@
     </style>
 </head>
 <body>
-    <h1>AMBIT Microprogram Visualizer</h1>
+    <h1>PIM Microprogram Visualizer</h1>
     
     <div class="controls">
         <div style="display:flex; gap:20px; align-items:flex-end; flex-wrap:wrap;">
             <div>
                 <label>Program:</label><br>
-                <select id="program">
+                <select id="program" onchange="generateRandom()">
                     <option value="">-- Select --</option>
-                    <option value="abs4">abs4 (4-bit)</option>
-                    <option value="abs8">abs8 (8-bit)</option>
-                    <option value="abs16">abs16 (16-bit)</option>
-                    <option value="abs32">abs32 (32-bit)</option>
-                    <option value="abs64">abs64 (64-bit)</option>
-                    <option value="bitcount4">bitcount4 (4-bit)</option>
-                    <option value="bitcount8">bitcount8 (8-bit)</option>
-                    <option value="bitcount16">bitcount16 (16-bit)</option>
-                    <option value="bitcount32">bitcount32 (32-bit)</option>
-                    <option value="bitcount64">bitcount64 (64-bit)</option>
                 </select>
             </div>
             <div>
-                <label>Input (decimal or 0xhex):</label><br>
-                <input type="text" id="inputVal" value="[5,1,2,3]" placeholder="e.g. [5,1,2,3] or 0xFF">
+                <label>Input (decimal, hex, or array for multi-operand):</label><br>
+                <input type="text" id="inputVal" value="5" placeholder="e.g. 5 for abs, [5,3] for add">
             </div>
             <button id="loadBtn" onclick="loadProgram()">Load</button>
             <button id="randomBtn" onclick="generateRandom()">Random</button>
@@ -97,12 +87,34 @@
         
         // Load all programs on page load
         async function init() {
-            const names = ['abs4','abs8','abs16','abs32','abs64','bitcount4','bitcount8','bitcount16','bitcount32','bitcount64'];
+            const names = [
+                'abs4','abs8','abs16','abs32','abs64',
+                'bitcount4','bitcount8','bitcount16','bitcount32','bitcount64',
+                'add4','add8','add16','add32',
+                'sub4','sub8','sub16','sub32',
+                'mul4','mul8','mul16','mul32',
+                'min4','min8','min16','min32',
+                'max4','max8','max16','max32',
+                'gt4','gt8','gt16','gt32',
+                'ge4','ge8','ge16','ge32',
+                'eq4','eq8','eq16','eq32',
+                'ifelse4','ifelse8','ifelse16','ifelse32','ifelse64',
+                'fa'
+            ];
+            const select = document.getElementById('program');
             for (const name of names) {
                 try {
                     const resp = await fetch('programs/' + name + '.txt');
                     if (resp.ok) {
                         programs[name] = parseProgram(await resp.text());
+                        // Extract bitwidth from name (e.g., "abs32" -> "32", "fa" -> "")
+                        const bitwidthMatch = name.match(/(\d+)$/);
+                        const bitwidth = bitwidthMatch ? bitwidthMatch[1] + '-bit' : '';
+                        const label = bitwidth ? `${name} (${bitwidth})` : name;
+                        const option = document.createElement('option');
+                        option.value = name;
+                        option.textContent = label;
+                        select.appendChild(option);
                         console.log('Loaded:', name);
                     }
                 } catch(e) {
@@ -173,6 +185,25 @@
         
         function parseInput(str) {
             str = str.trim();
+            
+            // Check for nested array format: [[1,2,3,4],[5,6,7,8]] for multi-operand with multi-value
+            if (str.startsWith('[[') && str.endsWith(']]')) {
+                const inner = str.slice(2, -2);
+                // Split at ],[ to get each operand array
+                const operandStrings = inner.split('],[').map(s => s.replace(/[\[\]]/g, ''));
+                const operands = operandStrings.map(partsStr => {
+                    return partsStr.split(',').map(s => {
+                        s = s.trim();
+                        if (s.startsWith('0x') || s.startsWith('0X')) {
+                            return parseInt(s, 16);
+                        }
+                        return parseInt(s, 10) || 0;
+                    });
+                });
+                return { isNested: true, operands: operands };
+            }
+            
+            // Simple array format: [5,3] for two operands with single values
             if (str.startsWith('[') && str.endsWith(']')) {
                 const inner = str.slice(1, -1);
                 const parts = inner.split(',').map(s => {
@@ -193,54 +224,241 @@
         function generateRandom() {
             const name = document.getElementById('program').value;
             if (!name) return;
-            bitWidth = name.startsWith('abs') ? parseInt(name.slice(3)) : parseInt(name.slice(8));
             
-            // Generate array of random values for each input
-            const numInputs = programs[name]?.inputs || 1;
-            const values = [];
-            for (let i = 0; i < numInputs; i++) {
-                const maxVal = 1 << bitWidth;
-                values.push(Math.floor(Math.random() * maxVal));
+            // Determine bitwidth from name
+            if (name.startsWith('abs') || name.startsWith('bitcount')) {
+                bitWidth = parseInt(name.replace(/\D/g, ''));
+            } else if (name === 'fa') {
+                bitWidth = 1;
+            } else {
+                // add, sub, mul, min, max, gt, ge, eq, ifelse
+                bitWidth = parseInt(name.replace(/\D/g, ''));
             }
-            document.getElementById('inputVal').value = '[' + values.join(',') + ']';
+            
+            // Determine number of operands from program
+            let numOperands = 1;
+            // Binary operations: add, sub, mul, min, max, gt, ge, eq, ifelse
+            if (name.startsWith('add') || name.startsWith('sub') || name.startsWith('mul') || 
+                name.startsWith('min') || name.startsWith('max') || name.startsWith('gt') || 
+                name.startsWith('ge') || name.startsWith('eq') || name.startsWith('ifelse')) {
+                numOperands = 2;
+            }
+            
+            // Generate random decimal values
+            if (numOperands > 1) {
+                // Binary operation - generate nested array [[a],[b]]
+                // Occasionally include signed values (upper half of range)
+                const operands = [];
+                for (let op = 0; op < numOperands; op++) {
+                    let val;
+                    if (bitWidth >= 32) {
+                        if (Math.random() < 0.3) {
+                            // Signed: 0x80000000 to 0xFFFFFFFF
+                            val = 0x80000000 + Math.floor(Math.random() * 0x80000000);
+                        } else {
+                            val = Math.floor(Math.random() * 0x7FFFFFFF);
+                        }
+                    } else {
+                        const maxSigned = 1 << (bitWidth - 1);
+                        if (Math.random() < 0.3) {
+                            // Signed: 2^(bitwidth-1) to 2^bitwidth-1
+                            val = maxSigned + Math.floor(Math.random() * maxSigned);
+                        } else {
+                            val = Math.floor(Math.random() * maxSigned);
+                        }
+                    }
+                    operands.push('[' + val + ']');
+                }
+                // Format as nested array: [[val1],[val2]]
+                document.getElementById('inputVal').value = '[' + operands.join(',') + ']';
+            } else {
+                // Unary operation - generate single decimal value
+                // Occasionally include signed values (upper half of range)
+                let val;
+                if (bitWidth >= 32) {
+                    const maxSigned = 0x7FFFFFFF;
+                    if (Math.random() < 0.3) {
+                        // Signed: 0x80000000 to 0xFFFFFFFF
+                        val = 0x80000000 + Math.floor(Math.random() * 0x80000000);
+                    } else {
+                        val = Math.floor(Math.random() * maxSigned);
+                    }
+                } else {
+                    const maxSigned = 1 << (bitWidth - 1);
+                    if (Math.random() < 0.3) {
+                        // Signed: 2^(bitwidth-1) to 2^bitwidth-1
+                        val = maxSigned + Math.floor(Math.random() * maxSigned);
+                    } else {
+                        val = Math.floor(Math.random() * maxSigned);
+                    }
+                }
+                document.getElementById('inputVal').value = val;
+            }
+            
+            // Clear any error state
+            document.getElementById('inputVal').style.border = '';
+            document.getElementById('loadBtn').disabled = false;
+            document.getElementById('stepBtn').disabled = false;
+            document.getElementById('runBtn').disabled = false;
         }
         
         function loadProgram() {
             const name = document.getElementById('program').value;
-            const inputData = parseInput(document.getElementById('inputVal').value);
+            const inputStr = document.getElementById('inputVal').value.trim();
             
             if (!name || !programs[name]) {
                 alert('Program not loaded: ' + name);
                 return;
             }
             
+            // Determine if binary operation
+            let isBinaryOp = false;
+            if (name.startsWith('add') || name.startsWith('sub') || name.startsWith('mul') || 
+                name.startsWith('min') || name.startsWith('max') || name.startsWith('gt') || 
+                name.startsWith('ge') || name.startsWith('eq') || name.startsWith('ifelse')) {
+                isBinaryOp = true;
+            }
+            
+            // Validate input format for binary operations
+            if (isBinaryOp) {
+                // Must be nested array format: [[a],[b]] or [[a,b],[c,d]]
+                if (!inputStr.startsWith('[[') || !inputStr.endsWith(']]')) {
+                    // Invalid format for binary op
+                    document.getElementById('inputVal').style.border = '2px solid red';
+                    document.getElementById('loadBtn').disabled = true;
+                    document.getElementById('stepBtn').disabled = true;
+                    document.getElementById('runBtn').disabled = true;
+                    return;
+                }
+            }
+            
+            // Clear error state
+            document.getElementById('inputVal').style.border = '';
+            document.getElementById('loadBtn').disabled = false;
+            document.getElementById('stepBtn').disabled = false;
+            document.getElementById('runBtn').disabled = false;
+            
+            const inputData = parseInput(inputStr);
+            
             program = programs[name];
             pc = 0;
 
             
             // Determine bitwidth from name
-            bitWidth = name.startsWith('abs') ? parseInt(name.slice(3)) : parseInt(name.slice(8));
-            const numCols = 8;  // Fixed number of columns (8 columns = 8 parallel computations)
+            if (name.startsWith('abs')) {
+                bitWidth = parseInt(name.slice(3));
+            } else if (name.startsWith('bitcount')) {
+                bitWidth = parseInt(name.slice(8));
+            } else if (name.startsWith('add') || name.startsWith('sub') || name.startsWith('mul') || 
+                       name.startsWith('min') || name.startsWith('max') || name.startsWith('gt') || 
+                       name.startsWith('ge') || name.startsWith('eq') || name.startsWith('ifelse')) {
+                bitWidth = parseInt(name.replace(/\D/g, ''));
+            }
+            const numCols = bitWidth;  // Use bitwidth as number of columns for parallel computation
             
             // Initialize registers as arrays
             registers = {};
             scrollOffset = 0;  // Reset scroll on load
             
-            // PACKED VERTICAL LAYOUT: Each column holds one operand
-            const inputArray = Array.isArray(inputData) ? inputData : [inputData];
+            // PACKED VERTICAL LAYOUT: Elements with same index go into same column
+            // For [[5,3],[6,5]]: column 0 = [5,6], column 1 = [3,5]
+            // Input: [[operand0_bits],[operand1_bits],...] 
+            // inputStr already declared above
+            let inputArray;
+            
+            if (inputStr.startsWith('[[') && inputStr.endsWith(']]')) {
+                // Nested format: [[1,0,1,0],[1,1,0,0]]
+                const inner = inputStr.slice(2, -2);
+                const operandStrings = inner.split('],[').map(s => s.replace(/[\[\]]/g, ''));
+                const operands = operandStrings.map(partsStr => {
+                    return partsStr.split(',').map(s => {
+                        s = s.trim();
+                        if (s.startsWith('0x') || s.startsWith('0X')) {
+                            return parseInt(s, 16);
+                        }
+                        return parseInt(s, 10) || 0;
+                    });
+                });
+                // Transpose: each column gets one element from each operand
+                const maxLen = Math.max(...operands.map(o => o.length));
+                inputArray = [];
+                for (let c = 0; c < maxLen; c++) {
+                    const colVals = operands.map(op => op[c] || 0);
+                    inputArray.push(colVals);
+                }
+            } else if (inputStr.startsWith('[') && inputStr.endsWith(']')) {
+                // Simple array format: [5,3] for two operands
+                const inner = inputStr.slice(1, -1);
+                const parts = inner.split(',').map(s => {
+                    s = s.trim();
+                    if (s.startsWith('0x') || s.startsWith('0X')) {
+                        return parseInt(s, 16);
+                    }
+                    return parseInt(s, 10) || 0;
+                });
+                inputArray = parts;
+            } else if (inputStr.startsWith('0x') || inputStr.startsWith('0X')) {
+                inputArray = [parseInt(inputStr, 16)];
+            } else {
+                inputArray = [parseInt(inputStr, 10) || 0];
+            }
             
             // Get all rows referenced in the program
             const allRows = getAllRowNames(program);
+            
+            // Determine if binary operation (add, sub, mul, min, max, gt, ge, eq, ifelse)
+            const progName = document.getElementById('program').value;
+            const isBinary = progName && (
+                progName.startsWith('add') || progName.startsWith('sub') || 
+                progName.startsWith('mul') || progName.startsWith('min') || 
+                progName.startsWith('max') || progName.startsWith('gt') || 
+                progName.startsWith('ge') || progName.startsWith('eq') || 
+                progName.startsWith('ifelse')
+            );
             
             // Initialize ALL rows upfront (not just inputs/outputs)
             for (const rowName of allRows) {
                 if (rowName.startsWith('I')) {
                     // Input row
-                    const bitPos = parseInt(rowName.slice(1));
+                    const inputIdx = parseInt(rowName.slice(1));
                     registers[rowName] = new Array(numCols).fill(0);
-                    for (let col = 0; col < inputArray.length && col < numCols; col++) {
-                        const val = inputArray[col] || 0;
-                        registers[rowName][col] = (val >> bitPos) & 1;
+                    
+                    if (isBinary) {
+                        // For binary ops with nested format [[a],[b]] or [[a,b],[c,d]]:
+                        // inputArray is [ [operands_at_col0], [operands_at_col1], ... ]
+                        // Each column has all operand values
+                        // I0-I(bitwidth-1) = bits of operand 0, I(bitwidth)-I(2*bitwidth-1) = bits of operand 1, etc.
+                        const maxCol = Math.min(inputArray.length, numCols);
+                        for (let col = 0; col < maxCol; col++) {
+                            const colData = inputArray[col];  // This is [operand0_val, operand1_val, ...]
+                            if (Array.isArray(colData)) {
+                                for (let opIdx = 0; opIdx < colData.length; opIdx++) {
+                                    const operandVal = colData[opIdx];
+                                    const startInputIdx = opIdx * bitWidth;
+                                    if (inputIdx >= startInputIdx && inputIdx < startInputIdx + bitWidth) {
+                                        const bitPos = inputIdx - startInputIdx;
+                                        const val = (operandVal >> bitPos) & 1;
+                                        registers[rowName][col] = val;
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // For unary ops: each input goes in a separate column
+                        // [val1, val2] → column 0 = val1, column 1 = val2
+                        for (let col = 0; col < inputArray.length && col < numCols; col++) {
+                            const colData = inputArray[col];
+                            let val;
+                            if (Array.isArray(colData)) {
+                                val = 0;
+                                for (const v of colData) {
+                                    val |= ((v >> inputIdx) & 1);
+                                }
+                            } else {
+                                val = (colData >> inputIdx) & 1;
+                            }
+                            registers[rowName][col] = val;
+                        }
                     }
                 } else if (rowName.startsWith('O')) {
                     // Output row
@@ -317,7 +535,7 @@
         }
 
         function render() {
-            const numCols = 8;
+            const numCols = bitWidth;
             const allRegNames = sortRowNames(Object.keys(registers));
             
             // Split rows into two groups:
@@ -333,11 +551,10 @@
                 }
             }
             
-            // Determine which data rows to show (max ~10)
-            const MAX_DATA_ROWS = 10;
-            const allRelevantRows = new Set([...activatedRows, ...previousRows]);
+            // Determine which data rows to show (max 16)
+            const MAX_DATA_ROWS = 16;
             
-            // Always include O* rows; then activated/previous data rows; fill rest with scroll window
+            // Show: O* rows + current activated + previous activated + scroll window
             const dataIndicesToShow = new Set();
             
             // Always show output rows
@@ -347,7 +564,8 @@
                 }
             }
             
-            // Show activated/previous data rows
+            // Show activated rows (current and previous)
+            const allRelevantRows = new Set([...activatedRows, ...previousRows]);
             for (const row of allRelevantRows) {
                 const idx = dataRows.indexOf(row);
                 if (idx !== -1) dataIndicesToShow.add(idx);
@@ -380,7 +598,7 @@
             
             // Ellipsis before first data row
             if (sortedDataIndices.length > 0 && sortedDataIndices[0] > 0) {
-                html += renderEllipsis(numCols, sortedDataIndices[0] + ' rows above');
+                html += renderEllipsis(numCols, sortedDataIndices[0] + ' rows used above');
             }
             
             for (let si = 0; si < sortedDataIndices.length; si++) {
@@ -390,7 +608,7 @@
                 // Gap ellipsis
                 if (si > 0 && sortedDataIndices[si] - sortedDataIndices[si - 1] > 1) {
                     const gap = sortedDataIndices[si] - sortedDataIndices[si - 1] - 1;
-                    html += renderEllipsis(numCols, gap + ' rows hidden');
+                    html += renderEllipsis(numCols, gap + ' rows used');
                 }
                 
                 html += renderRow(reg, numCols);
@@ -399,7 +617,7 @@
             // Ellipsis after last data row
             if (sortedDataIndices.length > 0 && sortedDataIndices[sortedDataIndices.length - 1] < dataRows.length - 1) {
                 const gap = dataRows.length - 1 - sortedDataIndices[sortedDataIndices.length - 1];
-                html += renderEllipsis(numCols, gap + ' rows below');
+                html += renderEllipsis(numCols, gap + ' rows used below');
             }
             
             html += '</table>';
@@ -456,14 +674,50 @@
             }
             
             const inputData = parseInput(document.getElementById('inputVal').value);
-            const isArrayInput = Array.isArray(inputData);
-            const inputArray = isArrayInput ? inputData : [inputData];
-            const inputDisplay = isArrayInput ? '[' + inputData.join(',') + ']' : inputData;
+            let inputArray;
+            let inputDisplay;
+            
+            if (typeof inputData === 'object' && inputData !== null && 'isNested' in inputData) {
+                // Nested array format: [[a],[b]] or [[a,b],[c,d]]
+                // For display, flatten each operand to values per column
+                const operands = inputData.operands;
+                const numCols2 = operands.length > 0 ? operands[0].length : 1;
+                inputArray = [];
+                for (let c = 0; c < numCols2; c++) {
+                    let val = 0;
+                    for (const op of operands) {
+                        val += op[c] || 0;
+                    }
+                    inputArray.push(val);
+                }
+                inputDisplay = document.getElementById('inputVal').value;
+            } else if (Array.isArray(inputData)) {
+                inputArray = inputData;
+                inputDisplay = '[' + inputData.join(',') + ']';
+            } else {
+                inputArray = [inputData];
+                inputDisplay = inputData;
+            }
             
             // Format output display - only show as many columns as there are inputs
             const numInputs = inputArray.length;
             const displayOutputs = outputVals.slice(0, numInputs);
-            const outputDisplay = displayOutputs.map(v => v === null ? '?' : v);
+            
+            // For sub, convert outputs from unsigned to signed for display
+            let outputDisplay;
+            const progName = document.getElementById('program').value;
+            if (progName && progName.startsWith('sub')) {
+                const maxSigned = bitWidth >= 32 ? 0x7FFFFFFF : (1 << (bitWidth - 1));
+                outputDisplay = displayOutputs.map(v => {
+                    if (v === null) return '?';
+                    if (v > maxSigned) {
+                        return v - (1 << bitWidth);
+                    }
+                    return v;
+                });
+            } else {
+                outputDisplay = displayOutputs.map(v => v === null ? '?' : v);
+            }
             
             let expected = 'N/A';
             let correct = false;
@@ -472,14 +726,20 @@
             if (isDone) {
                 const progName = document.getElementById('program').value;
                 if (progName.startsWith('abs')) {
-                    const maxSigned = 1 << (bitWidth - 1);
-                    const mask = (1 << bitWidth) - 1;
+                    const maxSigned = bitWidth >= 32 ? 0x7FFFFFFF : (1 << (bitWidth - 1));
+                    const mask = bitWidth >= 32 ? 0xFFFFFFFF : ((1 << bitWidth) - 1);
                     let allCorrect = true;
                     expected = [];
                     for (let i = 0; i < numInputs; i++) {
-                        const val = inputArray[i];
-                        const signed = val >= maxSigned ? val - (1 << bitWidth) : val;
-                        const exp = Math.abs(signed) & mask;
+                        let val = inputArray[i];
+                        let signed;
+                        if (bitWidth >= 32) {
+                            signed = val > maxSigned ? val - 0x100000000 : val;
+                        } else {
+                            signed = val > maxSigned ? val - (1 << bitWidth) : val;
+                        }
+                        let exp = Math.abs(signed) & mask;
+                        if (bitWidth >= 32) exp = exp >>> 0;  // Force unsigned for 32-bit
                         expected.push(exp);
                         if (displayOutputs[i] !== exp) allCorrect = false;
                     }
@@ -491,6 +751,212 @@
                         const exp = inputArray[i].toString(2).split('1').length - 1;
                         expected.push(exp);
                         if (displayOutputs[i] !== exp) allCorrect = false;
+                    }
+                    correct = allCorrect;
+                } else if (progName.startsWith('add')) {
+                    const mask = bitWidth >= 32 ? 0xFFFFFFFF : ((1 << bitWidth) - 1);
+                    let allCorrect = true;
+                    expected = [];
+                    const inputStr = document.getElementById('inputVal').value;
+                    if (inputStr.startsWith('[[') && inputStr.endsWith(']]')) {
+                        const inner = inputStr.slice(2, -2);
+                        const operandStrings = inner.split('],[').map(s => s.replace(/[\[\]]/g, ''));
+                        const operands = operandStrings.map(partsStr => {
+                            return partsStr.split(',').map(s => parseInt(s.trim(), 10) || 0);
+                        });
+                        const numCols2 = operands.length > 0 ? operands[0].length : 1;
+                        for (let c = 0; c < numCols2; c++) {
+                            let sum = 0;
+                            for (const op of operands) {
+                                sum += op[c] || 0;
+                            }
+                            let exp = sum & mask;
+                            if (bitWidth >= 32) exp = exp >>> 0;
+                            expected.push(exp);
+                        }
+                        for (let c = 0; c < expected.length; c++) {
+                            if (displayOutputs[c] !== expected[c]) allCorrect = false;
+                        }
+                    }
+                    correct = allCorrect;
+                } else if (progName.startsWith('sub')) {
+                    const mask = bitWidth >= 32 ? 0xFFFFFFFF : ((1 << bitWidth) - 1);
+                    const maxSigned = bitWidth >= 32 ? 0x7FFFFFFF : (1 << (bitWidth - 1));
+                    let allCorrect = true;
+                    expected = [];
+                    const inputStr = document.getElementById('inputVal').value;
+                    if (inputStr.startsWith('[[') && inputStr.endsWith(']]')) {
+                        const inner = inputStr.slice(2, -2);
+                        const operandStrings = inner.split('],[').map(s => s.replace(/[\[\]]/g, ''));
+                        const operands = operandStrings.map(partsStr => {
+                            return partsStr.split(',').map(s => parseInt(s.trim(), 10) || 0);
+                        });
+                        const numCols2 = operands.length > 0 ? operands[0].length : 1;
+                        for (let c = 0; c < numCols2; c++) {
+                            let a = operands[0][c] || 0;
+                            let b = operands[1][c] || 0;
+                            let diff = a - b;
+                            // Expected is signed
+                            expected.push(diff);
+                        }
+                        // Convert outputs from unsigned to signed for comparison
+                        const displayOutputsSigned = displayOutputs.map(v => {
+                            if (v > maxSigned) {
+                                return v - (1 << bitWidth);
+                            }
+                            return v;
+                        });
+                        for (let c = 0; c < expected.length; c++) {
+                            if (displayOutputsSigned[c] !== expected[c]) allCorrect = false;
+                        }
+                    }
+                    correct = allCorrect;
+                } else if (progName.startsWith('mul')) {
+                    const mask = bitWidth >= 32 ? 0xFFFFFFFF : ((1 << bitWidth) - 1);
+                    let allCorrect = true;
+                    expected = [];
+                    const inputStr = document.getElementById('inputVal').value;
+                    if (inputStr.startsWith('[[') && inputStr.endsWith(']]')) {
+                        const inner = inputStr.slice(2, -2);
+                        const operandStrings = inner.split('],[').map(s => s.replace(/[\[\]]/g, ''));
+                        const operands = operandStrings.map(partsStr => {
+                            return partsStr.split(',').map(s => parseInt(s.trim(), 10) || 0);
+                        });
+                        const numCols2 = operands.length > 0 ? operands[0].length : 1;
+                        for (let c = 0; c < numCols2; c++) {
+                            let prod = 1;
+                            for (const op of operands) {
+                                prod *= (op[c] || 0);
+                            }
+                            let exp = prod & mask;
+                            if (bitWidth >= 32) exp = exp >>> 0;
+                            expected.push(exp);
+                        }
+                        for (let c = 0; c < expected.length; c++) {
+                            if (displayOutputs[c] !== expected[c]) allCorrect = false;
+                        }
+                    }
+                    correct = allCorrect;
+                } else if (progName.startsWith('min')) {
+                    let allCorrect = true;
+                    expected = [];
+                    const inputStr = document.getElementById('inputVal').value;
+                    if (inputStr.startsWith('[[') && inputStr.endsWith(']]')) {
+                        const inner = inputStr.slice(2, -2);
+                        const operandStrings = inner.split('],[').map(s => s.replace(/[\[\]]/g, ''));
+                        const operands = operandStrings.map(partsStr => {
+                            return partsStr.split(',').map(s => parseInt(s.trim(), 10) || 0);
+                        });
+                        const numCols2 = operands.length > 0 ? operands[0].length : 1;
+                        for (let c = 0; c < numCols2; c++) {
+                            let exp = Math.min(...operands.map(op => op[c] || 0));
+                            expected.push(exp);
+                        }
+                        for (let c = 0; c < expected.length; c++) {
+                            if (displayOutputs[c] !== expected[c]) allCorrect = false;
+                        }
+                    }
+                    correct = allCorrect;
+                } else if (progName.startsWith('max')) {
+                    let allCorrect = true;
+                    expected = [];
+                    const inputStr = document.getElementById('inputVal').value;
+                    if (inputStr.startsWith('[[') && inputStr.endsWith(']]')) {
+                        const inner = inputStr.slice(2, -2);
+                        const operandStrings = inner.split('],[').map(s => s.replace(/[\[\]]/g, ''));
+                        const operands = operandStrings.map(partsStr => {
+                            return partsStr.split(',').map(s => parseInt(s.trim(), 10) || 0);
+                        });
+                        const numCols2 = operands.length > 0 ? operands[0].length : 1;
+                        for (let c = 0; c < numCols2; c++) {
+                            let exp = Math.max(...operands.map(op => op[c] || 0));
+                            expected.push(exp);
+                        }
+                        for (let c = 0; c < expected.length; c++) {
+                            if (displayOutputs[c] !== expected[c]) allCorrect = false;
+                        }
+                    }
+                    correct = allCorrect;
+                } else if (progName.startsWith('gt')) {
+                    let allCorrect = true;
+                    expected = [];
+                    const inputStr = document.getElementById('inputVal').value;
+                    if (inputStr.startsWith('[[') && inputStr.endsWith(']]')) {
+                        const inner = inputStr.slice(2, -2);
+                        const operandStrings = inner.split('],[').map(s => s.replace(/[\[\]]/g, ''));
+                        const operands = operandStrings.map(partsStr => {
+                            return partsStr.split(',').map(s => parseInt(s.trim(), 10) || 0);
+                        });
+                        const numCols2 = operands.length > 0 ? operands[0].length : 1;
+                        for (let c = 0; c < numCols2; c++) {
+                            let exp = (operands[0][c] || 0) > (operands[1][c] || 0) ? 1 : 0;
+                            expected.push(exp);
+                        }
+                        for (let c = 0; c < expected.length; c++) {
+                            if (displayOutputs[c] !== expected[c]) allCorrect = false;
+                        }
+                    }
+                    correct = allCorrect;
+                } else if (progName.startsWith('ge')) {
+                    let allCorrect = true;
+                    expected = [];
+                    const inputStr = document.getElementById('inputVal').value;
+                    if (inputStr.startsWith('[[') && inputStr.endsWith(']]')) {
+                        const inner = inputStr.slice(2, -2);
+                        const operandStrings = inner.split('],[').map(s => s.replace(/[\[\]]/g, ''));
+                        const operands = operandStrings.map(partsStr => {
+                            return partsStr.split(',').map(s => parseInt(s.trim(), 10) || 0);
+                        });
+                        const numCols2 = operands.length > 0 ? operands[0].length : 1;
+                        for (let c = 0; c < numCols2; c++) {
+                            let exp = (operands[0][c] || 0) >= (operands[1][c] || 0) ? 1 : 0;
+                            expected.push(exp);
+                        }
+                        for (let c = 0; c < expected.length; c++) {
+                            if (displayOutputs[c] !== expected[c]) allCorrect = false;
+                        }
+                    }
+                    correct = allCorrect;
+                } else if (progName.startsWith('eq')) {
+                    let allCorrect = true;
+                    expected = [];
+                    const inputStr = document.getElementById('inputVal').value;
+                    if (inputStr.startsWith('[[') && inputStr.endsWith(']]')) {
+                        const inner = inputStr.slice(2, -2);
+                        const operandStrings = inner.split('],[').map(s => s.replace(/[\[\]]/g, ''));
+                        const operands = operandStrings.map(partsStr => {
+                            return partsStr.split(',').map(s => parseInt(s.trim(), 10) || 0);
+                        });
+                        const numCols2 = operands.length > 0 ? operands[0].length : 1;
+                        for (let c = 0; c < numCols2; c++) {
+                            let exp = (operands[0][c] || 0) === (operands[1][c] || 0) ? 1 : 0;
+                            expected.push(exp);
+                        }
+                        for (let c = 0; c < expected.length; c++) {
+                            if (displayOutputs[c] !== expected[c]) allCorrect = false;
+                        }
+                    }
+                    correct = allCorrect;
+                } else if (progName.startsWith('ifelse')) {
+                    let allCorrect = true;
+                    expected = [];
+                    const inputStr = document.getElementById('inputVal').value;
+                    if (inputStr.startsWith('[[') && inputStr.endsWith(']]')) {
+                        const inner = inputStr.slice(2, -2);
+                        const operandStrings = inner.split('],[').map(s => s.replace(/[\[\]]/g, ''));
+                        const operands = operandStrings.map(partsStr => {
+                            return partsStr.split(',').map(s => parseInt(s.trim(), 10) || 0);
+                        });
+                        // ifelse: [condition, true_val, false_val]
+                        const numCols2 = operands.length > 0 ? operands[0].length : 1;
+                        for (let c = 0; c < numCols2; c++) {
+                            let cond = operands[0][c] || 0;
+                            let exp = cond ? (operands[1][c] || 0) : (operands[2][c] || 0);
+                            expected.push(exp);
+                        }
+                        for (let c = 0; c < expected.length; c++) {
+                            if (displayOutputs[c] !== expected[c]) allCorrect = false;
+                        }
                     }
                     correct = allCorrect;
                 }
@@ -517,7 +983,7 @@
             if (pc >= program.instrs.length) return;
             
             const instr = program.instrs[pc];
-            const numCols = 8;  // Fixed: 8 columns for parallel computations
+            const numCols = bitWidth;  // Use bitwidth for number of columns
             
             if (instr.type === 'AAP') {
                 // AAP semantics from AMBIT:

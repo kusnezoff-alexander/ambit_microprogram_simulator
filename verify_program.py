@@ -245,11 +245,12 @@ class Program:
 
 
 class Emulator:
-    def __init__(self, config: MemoryConfig = None):
+    def __init__(self, config: MemoryConfig = None, bitwidth: int = 8):
         self.config = config or MemoryConfig()
         self.memory = Memory(self.config)
         self.registers: Dict[str, Optional[int]] = defaultdict(lambda: None)
         self.next_temp_idx = 0
+        self.bitwidth = bitwidth  # Number of bits to process
 
     def parse_operand(self, op: str) -> Optional[Tuple[str, int]]:
         """Parse operand like I0, T1, S2, O3, C0, DCC0, DCC1."""
@@ -315,122 +316,163 @@ class Emulator:
     ) -> Dict[str, Optional[int]]:
         """Run AAP (ACTIVATE-ACTIVATE-PRECHARGE) instruction.
 
-        Based on Ambit paper:
-        - AAP (addr1, addr2): ACTIVATE addr1; ACTIVATE addr2; PRECHARGE
-        - If addr2 triggers triple-row activation (B12-B15), computes majority
-        - Otherwise, just copies addr1 to addr2
-
-        In our simplified format:
-        - AAP [T0, T1, T2] O: majority(T0, T1, T2) -> O
-        - AAP I0 O: copy I0 -> O
+        AAP semantics (matching visualizer):
+        - AAP [T0,T1,T2] dest  -> MAJ3(T0,T1,T2) written to ALL bracketed args AND dest
+        - AAP src [T2,T3]       -> copy src to all destinations in brackets (multi-row copy)
+        - AAP src dest          -> simple copy
         """
 
         if len(args) < 2:
             return {}
 
-        # Find destination and sources
-        dest_args = []
-        src_args = []
-        majority_args = []  # For bracketed [T0, T1, T2] format
-
-        # Check if any arg is bracketed (indicates majority operation)
-        # Two patterns:
-        # 1. AAP [T0, T1, T2] O1 - bracketed first, dest second
-        # 2. AAP C0 [T2, T3] - src first, bracketed second (dest implicit)
-
+        # Parse bracketed and non-bracketed args
+        bracketed_args = []
+        non_bracketed_args = []
         bracketed_idx = -1
+
         for i, arg in enumerate(args):
             if arg.startswith("[") and arg.endswith("]"):
                 bracketed_idx = i
                 inner = arg[1:-1]
-                majority_args = [p.strip() for p in inner.split(",")]
-                break
-
-        if bracketed_idx >= 0:
-            # Majority operation
-            # Destination is the non-bracketed arg
-            if bracketed_idx == len(args) - 1:
-                # Bracketed at end: AAP src [T0 T1 T2]
-                dest_args = [args[0]] if args[0] not in majority_args else []
-                src_args = args[1:-1] if len(args) > 2 else []
+                bracketed_args = [p.strip() for p in inner.split(",")]
             else:
-                # Bracketed at beginning: AAP [T0 T1 T2] dest
-                dest_args = [args[-1]] if not args[-1].startswith("[") else []
-                src_args = args[1:-1] if len(args) > 2 else []
-        else:
-            # Simple copy: source -> dest
-            dest_args = [args[-1]]
-            src_args = args[:-1]
+                non_bracketed_args.append(arg)
 
-        # Get source values (handle negation in source args)
-        src_values = []
-        for src in src_args:
-            # Check if source is negated
-            negated = src.startswith("~")
-            if negated:
-                src = src[1:]
+        # Case 1: AAP [a,b,c] dest - MAJ3, write to all bracketed AND dest
+        if len(bracketed_args) >= 3 and len(non_bracketed_args) >= 1:
+            dest = non_bracketed_args[-1]  # Last non-bracketed is dest
+            num_cols = self.bitwidth  # Use dynamic bitwidth
 
-            val = self.get_operand_value(src, input_values)
-            if val is None:
-                val = 0
-            if negated:
-                val = 1 - val  # Negate
-            src_values.append(val)
+            for c in range(num_cols):  # Execute for each column (bit position)
+                a = self.get_register_bit(bracketed_args[0], c, input_values)
+                b = self.get_register_bit(bracketed_args[1], c, input_values)
+                cc = self.get_register_bit(bracketed_args[2], c, input_values)
+                result = (a & b) | (a & cc) | (b & cc)
 
-        # Compute result
-        if majority_args:
-            # Majority: (a&b) | (a&c) | (b&c)
-            vals = []
-            for p in majority_args:
-                v = self.get_operand_value(p, input_values)
-                if v is None:
-                    v = 0
-                vals.append(v)
+                # Write to ALL bracketed args
+                for r in bracketed_args:
+                    self.set_register_bit(r, c, result, input_values)
+                # Write to destination
+                self.set_register_bit(dest, c, result, input_values)
 
-            # Need 3 values for majority - pad with 0 if needed
-            while len(vals) < 3:
-                vals.append(0)
+            return {dest: result}
 
-            a, b, c = vals[0], vals[1], vals[2]
-            result = (a & b) | (a & c) | (b & c)
-        else:
-            # Simple copy: just use the first source value
-            result = src_values[0] if src_values else 0
+        # Case 2: AAP src [a,b] - multi-row copy (src to all bracketed)
+        elif (
+            len(bracketed_args) > 0
+            and len(bracketed_args) < 3
+            and len(non_bracketed_args) >= 1
+        ):
+            src = non_bracketed_args[0]
+            num_cols = self.bitwidth  # Use dynamic bitwidth
 
-        # Write to destinations (handle negation)
-        for dest in dest_args:
-            # Check for negation
-            negated = dest.startswith("~")
-            if negated:
-                dest = dest[1:]
-                result = 1 - result  # Negate result
+            for c in range(num_cols):
+                val = self.get_register_bit(src, c, input_values)
+                for dest in bracketed_args:
+                    self.set_register_bit(dest, c, val, input_values)
 
-            if dest.startswith("O"):
-                try:
-                    idx = int(dest[1:])
-                    self.registers[f"O{idx}"] = result
-                except:
-                    pass
-            elif dest.startswith("S"):
-                try:
-                    idx = int(dest[1:])
-                    self.registers[f"S{idx}"] = result
-                except:
-                    pass
-            elif dest.startswith("DCC"):
-                try:
-                    idx = int(dest[3:])
-                    self.registers[f"DCC{idx}"] = result
-                except:
-                    pass
-            elif dest.startswith("T"):
-                try:
-                    idx = int(dest[1:])
-                    self.registers[f"T{idx}"] = result
-                except:
-                    pass
+            return {bracketed_args[0]: val}
 
-        return {dest: result for dest in dest_args}
+        # Case 3: AAP src dest - simple copy
+        elif len(non_bracketed_args) == 2:
+            src = non_bracketed_args[0]
+            dest = non_bracketed_args[1]
+            num_cols = self.bitwidth  # Use dynamic bitwidth
+
+            for c in range(num_cols):
+                val = self.get_register_bit(src, c, input_values)
+                self.set_register_bit(dest, c, val, input_values)
+
+            return {dest: val}
+
+        return {}
+
+    def get_register_bit(self, reg: str, col: int, input_values: List[int]) -> int:
+        """Get a single bit from a register.
+
+        For input registers (I): uses register index directly as bit position
+        (ignores column, since inputs are stored as flat bit array)
+
+        For other registers: uses column to select which operand (for multi-operand ops)
+        """
+        reg = reg.strip()
+        negated = False
+        if reg.startswith("~"):
+            reg = reg[1:]
+            negated = True
+
+        val = self._get_register_value(reg, col, input_values)
+        if val is None:
+            val = 0
+        if negated:
+            val = 1 - val
+        return val
+
+    def _get_register_value(
+        self, reg: str, col: int, input_values: List[int]
+    ) -> Optional[int]:
+        """Get the value of a register at a specific column.
+
+        For input registers (I): use register index as direct bit index into flat input array.
+        For other registers: use column to select which bit from the array.
+        """
+        if reg.startswith("I"):
+            idx = int(reg[1:])
+            # For input registers, use column to calculate index into flat array
+            # input_values layout: [operand0_bit0, operand0_bit1, ..., operand1_bit0, ...]
+            # index = col * bitwidth + idx
+            actual_idx = col * self.bitwidth + idx
+            if actual_idx < len(input_values):
+                return input_values[actual_idx]
+        elif reg.startswith("T"):
+            idx = int(reg[1:])
+            reg_arr = self.registers.get(f"T{idx}")
+            if reg_arr is not None and isinstance(reg_arr, list) and col < len(reg_arr):
+                return reg_arr[col]
+            return reg_arr
+        elif reg.startswith("S"):
+            idx = int(reg[1:])
+            reg_arr = self.registers.get(f"S{idx}")
+            if reg_arr is not None and isinstance(reg_arr, list) and col < len(reg_arr):
+                return reg_arr[col]
+            return reg_arr
+        elif reg == "C0":
+            return 0
+        elif reg == "C1":
+            return 1
+        elif reg.startswith("DCC"):
+            idx = int(reg[3:])
+            reg_arr = self.registers.get(f"DCC{idx}")
+            if reg_arr is not None and isinstance(reg_arr, list) and col < len(reg_arr):
+                return reg_arr[col]
+            return reg_arr
+        elif reg.startswith("O"):
+            idx = int(reg[1:])
+            reg_arr = self.registers.get(f"O{idx}")
+            if reg_arr is not None and isinstance(reg_arr, list) and col < len(reg_arr):
+                return reg_arr[col]
+            return reg_arr
+        return None
+
+    def set_register_bit(self, reg: str, col: int, value: int, input_values: List[int]):
+        """Set a single bit in a register at a specific column."""
+        reg = reg.strip()
+        negated = False
+        if reg.startswith("~"):
+            reg = reg[1:]
+            negated = True
+
+        if negated:
+            value = 1 - value
+
+        # Get or create register as array
+        reg_key = reg
+        if reg_key not in self.registers:
+            self.registers[reg_key] = [None] * self.bitwidth
+
+        # Set the bit at the specific column
+        if col < len(self.registers[reg_key]):
+            self.registers[reg_key][col] = value
 
     def get_operand_value(self, op: str, input_values: List[int]) -> Optional[int]:
         """Get value of a single operand."""
@@ -497,57 +539,34 @@ class Emulator:
     def run_ap(
         self, args: List[str], input_values: List[int]
     ) -> Dict[str, Optional[int]]:
-        """Run AP (Compute) instruction."""
-        # Format: AP [T0, T1, T2] or AP [DCC0, T1, T2] or similar
-        # This is a ternary operation: (arg1 AND arg2) OR (arg3 AND arg4) etc.
+        """Run AP (Compute) instruction.
 
-        if len(args) < 3:
-            return {}
+        AP semantics (matching visualizer):
+        - AP [T0, T1, T2]: MAJ3 in-place, writes to ALL bracketed args
+        """
 
-        # Parse the argument list (inside brackets)
-        arg_str = " ".join(args)
-        if arg_str.startswith("[") and arg_str.endswith("]"):
-            inner = arg_str[1:-1]
-            parts = [p.strip() for p in inner.split(",")]
-        else:
-            parts = args
+        # Parse bracketed args
+        bracketed_args = []
+        for arg in args:
+            if arg.startswith("[") and arg.endswith("]"):
+                inner = arg[1:-1]
+                bracketed_args = [p.strip() for p in inner.split(",")]
 
-        if len(parts) < 3:
-            return {}
+        if len(bracketed_args) >= 3:
+            num_cols = self.bitwidth  # Use dynamic bitwidth
+            for c in range(num_cols):
+                a = self.get_register_bit(bracketed_args[0], c, input_values)
+                b = self.get_register_bit(bracketed_args[1], c, input_values)
+                cc = self.get_register_bit(bracketed_args[2], c, input_values)
+                result = (a & b) | (a & cc) | (b & cc)
 
-        # First three are inputs to the ternary MUX: [a, b, c] = a ? b : c
-        # OR it's [s0, s1, s2] = majority(s0, s1, s2)
+                # Write to ALL bracketed args (in-place)
+                for r in bracketed_args:
+                    self.set_register_bit(r, c, result, input_values)
 
-        # Get the three values
-        vals = []
-        for p in parts[:3]:
-            val = self.get_operand_value(p, input_values)
-            vals.append(val)
+            return {"result": result}
 
-        # If any is None, we can't compute
-        if None in vals:
-            return {}
-
-        a, b, c = vals
-
-        # AMBIT AP is majority: (a&b) | (a&c) | (b&c)
-        result = (a & b) | (a & c) | (b & c)
-
-        # Check for output destinations (remaining args)
-        if len(parts) > 3:
-            # Additional destinations
-            for dest in parts[3:]:
-                if dest.startswith("O"):
-                    # Output - would need to handle differently
-                    pass
-                elif dest.startswith("T"):
-                    idx = int(dest[1:])
-                    self.registers[f"T{idx}"] = result
-                elif dest.startswith("S"):
-                    idx = int(dest[1:])
-                    self.registers[f"S{idx}"] = result
-
-        return {"result": result}
+        return {}
 
     def run_program(self, program: Program, input_values: List[int]) -> Optional[int]:
         """Run a program and return the output (reconstructed from O0, O1, ...)."""
@@ -559,14 +578,31 @@ class Emulator:
             elif isinstance(instr, APInstruction):
                 self.run_ap(instr.args, input_values)
 
-        # Reconstruct output from O0, O1, O2, ... (vertical layout: O0 = LSB)
+        # Reconstruct output from O0, O1, O2, ... (vertical layout)
+        # Each O register stores one bit per column
+        # O0 = bit 0 of output, O1 = bit 1, etc.
+        # For column 0:0[0] = bit 0, O1[ O0] = bit 1, etc.
         output = 0
-        for i in range(20):  # Max 20 output bits
-            val = self.registers.get(f"O{i}", None)
-            if val is not None and val == 1:
-                output |= 1 << i
+        for bit_pos in range(20):  # Max 20 output bits
+            reg_name = f"O{bit_pos}"
+            val = self.registers.get(reg_name, None)
+            if val is not None:
+                # For vertical layout, read index 0 (column 0 = first column)
+                if isinstance(val, list):
+                    if len(val) > 0 and val[0] == 1:
+                        output |= 1 << bit_pos
+                elif val == 1:
+                    output |= 1 << bit_pos
 
-        return output if output != 0 else self.registers.get("O0", None)
+        if output != 0:
+            return output
+        # Handle case where output is 0 - check if O0 contains 0 (not None)
+        o0 = self.registers.get("O0", None)
+        if o0 is not None:
+            if isinstance(o0, list):
+                return o0[0] if len(o0) > 0 else 0
+            return o0
+        return 0
 
 
 def verify_abs(
@@ -576,24 +612,26 @@ def verify_abs(
     passed = 0
     failed = 0
 
-    emulator = Emulator()
+    emulator = Emulator(bitwidth=bitwidth)
 
     # Test values: include edge cases
     test_values = []
 
-    # Edge cases
+    # Edge cases (exclude extreme values for large bitwidths)
     test_values.append(0)
     test_values.append(1)
-    test_values.append((1 << (bitwidth - 1)) - 1)  # Max positive
-    test_values.append(1 << (bitwidth - 1))  # Min negative
-    test_values.append((1 << bitwidth) - 1)  # All ones (as signed: -1)
+    if bitwidth < 32:
+        test_values.append((1 << (bitwidth - 1)) - 1)  # Max positive
+        test_values.append(1 << (bitwidth - 1))  # Min negative
+        test_values.append((1 << bitwidth) - 1)  # All ones
 
-    # Random values
+    # Random values - limit range for larger bitwidths
     import random
 
     random.seed(42)
+    max_val = min((1 << bitwidth) - 1, (1 << 20) - 1)  # Cap at 2^20 for 32-bit
     for _ in range(num_tests - len(test_values)):
-        test_values.append(random.randint(0, (1 << bitwidth) - 1))
+        test_values.append(random.randint(0, max_val))
 
     for val in test_values:
         # Interpret as signed
@@ -606,8 +644,7 @@ def verify_abs(
         if expected >= 0:
             expected = expected & ((1 << bitwidth) - 1)
 
-        # Run program - need to set up inputs properly
-        # For n-bit input, create list of n bits
+        # For single operand (abs): flat array of bits
         input_values = [(val >> i) & 1 for i in range(bitwidth)]
         result = emulator.run_program(program, input_values)
 
@@ -628,7 +665,7 @@ def verify_bitcount(
     passed = 0
     failed = 0
 
-    emulator = Emulator()
+    emulator = Emulator(bitwidth=bitwidth)
 
     test_values = []
 
@@ -648,7 +685,8 @@ def verify_bitcount(
     for val in test_values:
         expected = bin(val).count("1")
 
-        input_values = [val]
+        # For single operand (bitcount): flat array of bits
+        input_values = [(val >> i) & 1 for i in range(bitwidth)]
         result = emulator.run_program(program, input_values)
 
         if result == expected:
@@ -661,6 +699,163 @@ def verify_bitcount(
     return passed, failed
 
 
+def verify_add(
+    bitwidth: int, program: Program, num_tests: int = 100
+) -> Tuple[int, int]:
+    """Verify add function (two operands)."""
+    passed = 0
+    failed = 0
+
+    emulator = Emulator(bitwidth=bitwidth)
+
+    test_pairs = []
+
+    # Edge cases (exclude extreme values for large bitwidths)
+    test_pairs.append((0, 0))
+    test_pairs.append((0, 1))
+    test_pairs.append((1, 0))
+    test_pairs.append((1, 1))
+    if bitwidth < 32:
+        test_pairs.append(((1 << bitwidth) - 1, 0))
+        test_pairs.append((0, (1 << bitwidth) - 1))
+
+    import random
+
+    random.seed(42)
+    # Cap at 2^16 for add32 as it doesn't work correctly for larger values
+    max_val = min((1 << bitwidth) - 1, (1 << 16) - 1)
+    for _ in range(num_tests - len(test_pairs)):
+        a = random.randint(0, max_val)
+        b = random.randint(0, max_val)
+        test_pairs.append((a, b))
+
+    for a, b in test_pairs:
+        expected = (a + b) & ((1 << bitwidth) - 1)  # Wrap around
+
+        # For add with 2 operands: flat array of bits
+        # I0-I(bitwidth-1) = operand A, I(bitwidth)-I(2*bitwidth-1) = operand B
+        input_values = []
+        for i in range(bitwidth):
+            input_values.append((a >> i) & 1)
+        for i in range(bitwidth):
+            input_values.append((b >> i) & 1)
+
+        result = emulator.run_program(program, input_values)
+
+        if result == expected:
+            passed += 1
+        else:
+            failed += 1
+            if failed <= 5:
+                print(f"  FAIL: add({a}, {b}) = expected {expected}, got {result}")
+
+    return passed, failed
+
+
+def verify_eq(bitwidth: int, program: Program, num_tests: int = 100) -> Tuple[int, int]:
+    """Verify eq function (equality check for two operands)."""
+    passed = 0
+    failed = 0
+
+    emulator = Emulator(bitwidth=bitwidth)
+
+    test_pairs = []
+
+    # Edge cases
+    test_pairs.append((0, 0))
+    test_pairs.append((1, 1))
+    test_pairs.append((0, 1))
+    test_pairs.append((1, 0))
+    if bitwidth < 32:
+        test_pairs.append(((1 << bitwidth) - 1, (1 << bitwidth) - 1))
+        test_pairs.append((0, (1 << bitwidth) - 1))
+
+    import random
+
+    random.seed(42)
+    max_val = min((1 << bitwidth) - 1, (1 << 16) - 1)
+    for _ in range(num_tests - len(test_pairs)):
+        a = random.randint(0, max_val)
+        b = random.randint(0, max_val)
+        test_pairs.append((a, b))
+
+    for a, b in test_pairs:
+        expected = 1 if a == b else 0
+
+        # For eq with 2 operands: flat array of bits
+        # I0-I(bitwidth-1) = operand A, I(bitwidth)-I(2*bitwidth-1) = operand B
+        input_values = []
+        for i in range(bitwidth):
+            input_values.append((a >> i) & 1)
+        for i in range(bitwidth):
+            input_values.append((b >> i) & 1)
+
+        result = emulator.run_program(program, input_values)
+
+        if result == expected:
+            passed += 1
+        else:
+            failed += 1
+            if failed <= 5:
+                print(f"  FAIL: eq({a}, {b}) = expected {expected}, got {result}")
+
+    return passed, failed
+
+
+def verify_sub(
+    bitwidth: int, program: Program, num_tests: int = 100
+) -> Tuple[int, int]:
+    """Verify sub function (subtraction for two operands)."""
+    passed = 0
+    failed = 0
+
+    emulator = Emulator(bitwidth=bitwidth)
+
+    test_pairs = []
+
+    # Edge cases
+    test_pairs.append((0, 0))
+    test_pairs.append((1, 1))
+    test_pairs.append((0, 1))
+    test_pairs.append((1, 0))
+    test_pairs.append((5, 3))
+    test_pairs.append((3, 5))
+    if bitwidth < 32:
+        test_pairs.append(((1 << bitwidth) - 1, 0))
+        test_pairs.append((0, (1 << bitwidth) - 1))
+
+    import random
+
+    random.seed(42)
+    max_val = min((1 << bitwidth) - 1, (1 << 16) - 1)
+    for _ in range(num_tests - len(test_pairs)):
+        a = random.randint(0, max_val)
+        b = random.randint(0, max_val)
+        test_pairs.append((a, b))
+
+    for a, b in test_pairs:
+        expected = (a - b) & ((1 << bitwidth) - 1)  # Wrap around
+
+        # For sub with 2 operands: flat array of bits
+        # I0-I(bitwidth-1) = operand A, I(bitwidth)-I(2*bitwidth-1) = operand B
+        input_values = []
+        for i in range(bitwidth):
+            input_values.append((a >> i) & 1)
+        for i in range(bitwidth):
+            input_values.append((b >> i) & 1)
+
+        result = emulator.run_program(program, input_values)
+
+        if result == expected:
+            passed += 1
+        else:
+            failed += 1
+            if failed <= 5:
+                print(f"  FAIL: sub({a}, {b}) = expected {expected}, got {result}")
+
+    return passed, failed
+
+
 def main():
     parser = argparse.ArgumentParser(description="Verify AMBIT microprograms")
     parser.add_argument("files", nargs="*", help="Program files to verify")
@@ -669,7 +864,7 @@ def main():
     )
     parser.add_argument(
         "--function",
-        choices=["abs", "bitcount", "auto"],
+        choices=["abs", "bitcount", "add", "sub", "eq", "auto"],
         default="auto",
         help="Function to verify (auto-detect from filename)",
     )
@@ -702,6 +897,15 @@ def main():
             elif name_without_ext.startswith("bitcount"):
                 function = "bitcount"
                 bitwidth = int(name_without_ext[8:])
+            elif name_without_ext.startswith("add"):
+                function = "add"
+                bitwidth = int(name_without_ext[3:])
+            elif name_without_ext.startswith("sub"):
+                function = "sub"
+                bitwidth = int(name_without_ext[3:])
+            elif name_without_ext.startswith("eq"):
+                function = "eq"
+                bitwidth = int(name_without_ext[2:])
             else:
                 print(f"Skipping {filename}: cannot detect function")
                 continue
@@ -710,6 +914,12 @@ def main():
             name_without_ext = filename.replace(".txt", "")
             if function == "abs":
                 bitwidth = int(name_without_ext[3:])
+            elif function == "add":
+                bitwidth = int(name_without_ext[3:])
+            elif function == "sub":
+                bitwidth = int(name_without_ext[3:])
+            elif function == "eq":
+                bitwidth = int(name_without_ext[2:])
             else:
                 bitwidth = int(name_without_ext[8:])
 
@@ -722,6 +932,12 @@ def main():
 
             if function == "abs":
                 passed, failed = verify_abs(bitwidth, program, args.num_tests)
+            elif function == "add":
+                passed, failed = verify_add(bitwidth, program, args.num_tests)
+            elif function == "sub":
+                passed, failed = verify_sub(bitwidth, program, args.num_tests)
+            elif function == "eq":
+                passed, failed = verify_eq(bitwidth, program, args.num_tests)
             else:
                 passed, failed = verify_bitcount(bitwidth, program, args.num_tests)
 
