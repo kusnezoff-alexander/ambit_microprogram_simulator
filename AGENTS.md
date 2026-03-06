@@ -224,12 +224,56 @@ I1 (bit0) |   0   |   1
 ├── AGENTS.md                    # This file
 ├── UNDERSTANDING.md             # Architecture notes
 ├── README.md                    # Project README
-├── visualize_program.html       # Web visualizer
+├── visualize_program.html       # Web visualizer (thin shell, loads JS modules)
+├── js/                          # JavaScript modules
+│   ├── core.js                 # Shared engine: state, rendering, UI, expected values
+│   ├── ambit.js                # Ambit backend: AAP/AP instructions, vertical layout
+│   └── reram.js                # ReRAM/MAGIC backend: NOR/NOT/INIT, horizontal layout
 ├── verify_program.py            # Python emulator/verifier
 ├── verify_structure.py          # Structural verifier
 ├── package.json                 # Node dependencies (htmlhint, eslint)
-├── programs/                    # Sample microprograms
+├── programs/                    # Ambit microprograms (AAP/AP)
 │   ├── abs4.txt - abs64.txt    # Absolute value programs
 │   └── bitcount4.txt - bitcount64.txt  # Population count programs
+├── programs_reram/              # ReRAM microprograms (SIMPLER-MAGIC JSON)
+│   ├── JSON_{32,64,128,256}_abs_8bit.json
+│   ├── JSON_{32,...}_adder_8bit.json
+│   ├── JSON_{32,...}_subtractor_8bit.json
+│   ├── JSON_{32,...}_multiplier_4bit.json
+│   └── JSON_{32,...}_popcount_8bit.json
 └── papers/                     # Reference papers (if available)
 ```
+
+## Backend Architecture
+
+The visualizer supports multiple PIM backends via a pluggable architecture.
+Each backend defines:
+
+| Property | Description |
+|---|---|
+| `name` | Display name (used as tab label) |
+| `instructionTypes` | Array of recognized instruction type strings |
+| `timingDefaults` | Object mapping instruction types to default latencies (ns) |
+| `programNames` | Array of program filenames to load |
+| `programDir` | Directory containing program files |
+| `memoryLabel` | Label for the memory array panel |
+| `parseProgram(text)` | Parse program text into `{instrs, inputs, outputs}` |
+| `stepInstruction(instr, registers, bitWidth, getReg, setReg)` | Execute one instruction |
+| `getStats(program)` | Return instruction counts object |
+| `formatStats(counts, timings)` | Return stats HTML string |
+
+Optional overrides: `initRegisters()`, `reconstructOutput()`, `getActivatedCells()`, `render()`.
+
+### Ambit Backend (DRAM)
+- **Layout:** Vertical — rows = bit positions, columns = parallel computation lanes
+- **Operations:** AAP (copy or MAJ3), AP (MAJ3 in-place) — applied column-wise
+- **Destructive:** Yes (MAJ3 overwrites source rows)
+
+### ReRAM Backend (Memristive Crossbar)
+- **Layout:** Horizontal — each row holds all bits of one value, columns = cell positions
+- **Programs:** SIMPLER-MAGIC JSON format (cycle-by-cycle execution plans)
+- **Operations:** `nor2` (NOR gate), `inv1` (NOT gate), `init` (batch cell reset)
+- **Execution:** One gate per cycle, sequential; each row is an independent SIMD lane
+- **Destructive:** No (results written to destination cell only, inputs preserved)
+- **Addressing:** Cell indices within a row (e.g., `new_n18(31)=inv1{A0(0)}`)
+- **Metadata:** JSON includes input/output signal→cell mappings, row size, gate counts
