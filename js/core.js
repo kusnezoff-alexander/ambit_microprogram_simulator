@@ -229,6 +229,9 @@ function generateRandom() {
     document.getElementById('loadBtn').disabled = false;
     document.getElementById('stepBtn').disabled = false;
     document.getElementById('runBtn').disabled = false;
+
+    // Auto-load the program after generating random input
+    loadProgram();
 }
 
 // Derive operand count and bits-per-operand from SIMPLER-MAGIC inputMap
