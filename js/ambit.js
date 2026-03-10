@@ -58,8 +58,7 @@ const AmbitBackend = {
     },
 
     // Execute a single instruction, mutating registers in-place
-    stepInstruction(instr, registers, bitWidth, getReg, setReg) {
-        const numCols = bitWidth;
+    stepInstruction(instr, registers, numCols, getReg, setReg) {
 
         if (instr.type === 'AAP') {
             this._execAAP(instr, numCols, getReg, setReg);

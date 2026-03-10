@@ -20,9 +20,11 @@ let program = null;
 let pc = 0;
 let registers = {};
 let bitWidth = 4;
+let numCols = 1;                   // Number of parallel computation lanes (columns)
 let activatedCells = new Set();   // Cells activated by current instruction
 let previousCells = new Set();    // Cells from previous instruction (shown dimmed)
 let scrollOffset = 0;             // Scroll position for row window
+let showAllRows = false;          // If true, show all rows without scrolling
 const MAX_VISIBLE_ROWS = 16;      // Maximum rows to show at once
 const programs = {};               // Loaded programs keyed by name
 
@@ -205,7 +207,7 @@ function generateRandom() {
     // For ReRAM, generate multiple SIMD lanes; for Ambit, generate a single value
     // (Ambit columns are bit positions, not independent lanes)
     const isReRAM = prog && prog.inputMap;
-    const numLanes = isReRAM ? 4 : 1;
+    const numLanes = isReRAM ? 4 : 8;
 
     if (numOperands > 1) {
         const operands = [];
@@ -328,10 +330,14 @@ function loadProgram() {
     // Parse input values
     const inputArray = parseInputArray(inputStr);
 
+    // Determine number of parallel lanes (columns) from the input
+    numCols = inputArray.length;
+
     // Initialize registers via backend-specific method if available,
     // otherwise use the default (Ambit-style vertical) initialization
     registers = {};
     scrollOffset = 0;
+    showAllRows = false;
     activatedCells = new Set();
     previousCells = new Set();
 
@@ -384,7 +390,6 @@ function parseInputArray(inputStr) {
 
 // Default (Ambit-style vertical) register initialization
 function initRegistersDefault(program, inputArray, isBinaryOp) {
-    const numCols = bitWidth;
     const allRows = getAllRowNames(program);
 
     for (const rowName of allRows) {
@@ -447,7 +452,7 @@ function getReg(reg, col) {
 function setReg(reg, col, val) {
     let neg = false;
     if (reg.startsWith('~')) { reg = reg.slice(1); neg = true; }
-    if (!registers[reg]) registers[reg] = new Array(bitWidth).fill(null);
+    if (!registers[reg]) registers[reg] = new Array(numCols).fill(null);
     registers[reg][col] = neg ? 1 - val : val;
 }
 
@@ -458,7 +463,7 @@ function setReg(reg, col, val) {
 function stepInstruction() {
     if (pc >= program.instrs.length) return;
     const instr = program.instrs[pc];
-    activeBackend.stepInstruction(instr, registers, bitWidth, getReg, setReg);
+    activeBackend.stepInstruction(instr, registers, numCols, getReg, setReg);
     pc++;
 }
 
@@ -640,7 +645,6 @@ function render() {
 }
 
 function renderDefault() {
-    const numCols = bitWidth;
     const allRegNames = sortRowNames(Object.keys(registers));
 
     // Split rows into compute (T*, DCC*) and data (I*, O*, C*, S*)
@@ -657,24 +661,32 @@ function renderDefault() {
     const MAX_DATA_ROWS = 16;
     const dataIndicesToShow = new Set();
 
-    // Always show output rows
-    for (let i = 0; i < dataRows.length; i++) {
-        if (dataRows[i].startsWith('O')) dataIndicesToShow.add(i);
-    }
-
-    // Show activated rows
-    const allRelevantRows = new Set([...activatedCells, ...previousCells]);
-    for (const row of allRelevantRows) {
-        const idx = dataRows.indexOf(row);
-        if (idx !== -1) dataIndicesToShow.add(idx);
-    }
-
-    // Fill with scroll window
-    if (dataIndicesToShow.size < MAX_DATA_ROWS) {
+    // If showAllRows is true, include ALL rows
+    if (showAllRows) {
+        for (let i = 0; i < dataRows.length; i++) {
+            dataIndicesToShow.add(i);
+        }
+    } else {
         const maxScroll = Math.max(0, dataRows.length - MAX_DATA_ROWS);
         scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
-        for (let i = scrollOffset; i < Math.min(scrollOffset + MAX_DATA_ROWS, dataRows.length); i++) {
+        const scrollStart = scrollOffset;
+        const scrollEnd = Math.min(scrollOffset + MAX_DATA_ROWS, dataRows.length);
+
+        // First: add rows from the scroll window
+        for (let i = scrollStart; i < scrollEnd; i++) {
             dataIndicesToShow.add(i);
+        }
+
+        // Second: add O and activated rows that are OUTSIDE the scroll window (if there's room)
+        const allRelevantRows = new Set([...activatedCells, ...previousCells]);
+        for (let i = 0; i < dataRows.length; i++) {
+            if (dataIndicesToShow.size >= MAX_DATA_ROWS) break;
+            const rowName = dataRows[i];
+            if (rowName.startsWith('O') || allRelevantRows.has(rowName)) {
+                if (i < scrollStart || i >= scrollEnd) {
+                    dataIndicesToShow.add(i);
+                }
+            }
         }
     }
 
@@ -685,9 +697,13 @@ function renderDefault() {
     html += `<div style="font-size:12px; color:#666; margin-bottom:4px;">${allRegNames.length} rows total</div>`;
 
     const maxScroll = Math.max(0, dataRows.length - MAX_DATA_ROWS);
+    const hasScroll = maxScroll > 0;
     html += '<div style="display:flex; gap:10px; margin-bottom:6px; align-items:center;">';
-    html += `<button onclick="scrollRows(-4)" style="padding:4px 10px;" ${scrollOffset <= 0 ? 'disabled' : ''}>&uarr;</button>`;
-    html += `<button onclick="scrollRows(4)" style="padding:4px 10px;" ${scrollOffset >= maxScroll ? 'disabled' : ''}>&darr;</button>`;
+    if (hasScroll) {
+        html += `<button onclick="scrollRows(-4)" style="padding:4px 10px;" ${scrollOffset <= 0 ? 'disabled' : ''}>&uarr;</button>`;
+        html += `<button onclick="scrollRows(4)" style="padding:4px 10px;" ${scrollOffset >= maxScroll ? 'disabled' : ''}>&darr;</button>`;
+    }
+    html += `<button onclick="toggleShowAll()" style="padding:4px 10px;">${showAllRows ? 'Show Less' : 'Show All'}</button>`;
     html += '</div>';
 
     html += '<table border="1" style="border-collapse:collapse; width:100%;">';
@@ -797,7 +813,6 @@ function updateStats() {
 // ============================================================
 
 function renderResult() {
-    const numCols = bitWidth;
     const progName = document.getElementById('program').value;
 
     // Reconstruct output values
@@ -1161,5 +1176,10 @@ function parseNestedOperands(inputStr) {
 
 function scrollRows(delta) {
     scrollOffset += delta;
+    render();
+}
+
+function toggleShowAll() {
+    showAllRows = !showAllRows;
     render();
 }
