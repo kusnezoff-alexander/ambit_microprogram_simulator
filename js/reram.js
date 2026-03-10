@@ -323,7 +323,7 @@ const ReRAMBackend = {
         // --- Signal-name header with rotated labels ---
         // Combines cell index + signal name in a single header row with rotated text
         html += '<tr>';
-        html += '<th style="padding:4px 8px; background:#007bff; color:white; font-size:11px; position:sticky; left:0; z-index:2; min-width:40px; vertical-align:bottom;">Row</th>';
+        html += '<th style="padding:2px 5px; background:#007bff; color:white; font-size:10px; position:sticky; left:0; z-index:2; min-width:30px; vertical-align:bottom;">Row</th>';
         for (let c = 0; c < rowSize; c++) {
             let thBg = '#adb5bd';
             if (inputCells.has(c)) thBg = '#28a745';
@@ -331,7 +331,7 @@ const ReRAMBackend = {
             const name = cellNames[c] || '';
             const label = name ? `${c} ${name}` : `${c}`;
             const title = name ? `${name} (cell ${c})` : `cell ${c}`;
-            html += `<th style="padding:2px 2px; background:${thBg}; color:white; font-size:10px; min-width:24px; height:50px; vertical-align:bottom; text-align:center;" title="${title}">`;
+            html += `<th style="padding:1px 1px; background:${thBg}; color:white; font-size:9px; min-width:20px; height:42px; vertical-align:bottom; text-align:center;" title="${title}">`;
             html += `<div style="writing-mode:vertical-lr; transform:rotate(180deg); font-family:monospace; font-size:9px; line-height:1; white-space:nowrap;">${label}</div>`;
             html += `</th>`;
         }
@@ -341,7 +341,7 @@ const ReRAMBackend = {
         for (const rn of rowNames) {
             const row = registers[rn];
             html += '<tr>';
-            html += `<td style="padding:4px 8px; background:#e7f3ff; font-weight:bold; font-family:monospace; font-size:11px; position:sticky; left:0; z-index:1;">${rn}</td>`;
+            html += `<td style="padding:2px 5px; background:#e7f3ff; font-weight:bold; font-family:monospace; font-size:10px; position:sticky; left:0; z-index:1;">${rn}</td>`;
             for (let c = 0; c < rowSize; c++) {
                 const v = row[c];
                 let bg = v === 1 ? '#d4edda' : v === 0 ? '#f8d7da' : '#f5f5f5';
@@ -359,7 +359,7 @@ const ReRAMBackend = {
                 }
 
                 const display = v === null ? '?' : v;
-                html += `<td data-row="${rn}" data-col="${c}" style="padding:3px 4px; background:${bg}; color:${color}; text-align:center; font-family:monospace; font-size:11px; ${extra}">${display}</td>`;
+                html += `<td data-row="${rn}" data-col="${c}" style="padding:2px 3px; background:${bg}; color:${color}; text-align:center; font-family:monospace; font-size:10px; ${extra}">${display}</td>`;
             }
             html += '</tr>';
         }
@@ -377,6 +377,7 @@ const ReRAMBackend = {
         html += '</div>';
 
         html += '</div>';
+        html += '<div id="result" style="margin-top:12px; padding-top:12px; border-top:1px solid #dee2e6;"></div>';
         document.getElementById('memory').innerHTML = html;
     },
 

@@ -277,7 +277,8 @@ async function testReRAMAbs() {
 
     // Check multiple lanes (rows) created
     const laneCount = await page.evaluate(() => {
-        const rows = document.querySelectorAll('#memory table tr');
+        const tbl = document.querySelector('#memory table');
+        const rows = tbl ? tbl.querySelectorAll('tr') : [];
         // Subtract 1 for header row
         return rows.length - 1;
     });

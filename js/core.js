@@ -576,7 +576,7 @@ function renderRow(reg, numCols) {
     } else {
         rowBg = '#e7f3ff'; rowBorder = '';
     }
-    let html = `<tr style="${rowBorder}"><td style="padding:6px 8px;background:${rowBg};font-weight:bold; font-family:monospace;">${reg}</td>`;
+    let html = `<tr style="${rowBorder}"><td style="padding:2px 5px;background:${rowBg};font-weight:bold; font-family:monospace; font-size:11px;">${reg}</td>`;
     for (let c = 0; c < numCols; c++) {
         const v = vals[c];
         let bg = v === 1 ? '#d4edda' : v === 0 ? '#f8d7da' : '#f5f5f5';
@@ -600,7 +600,7 @@ function renderRow(reg, numCols) {
             }
         }
 
-        html += `<td data-row="${reg}" data-col="${c}" style="padding:6px 8px;background:${bg};color:${color};text-align:center; font-family:monospace;${cellHighlight}">${v === null ? '?' : v}</td>`;
+        html += `<td data-row="${reg}" data-col="${c}" style="padding:2px 4px;background:${bg};color:${color};text-align:center; font-family:monospace; font-size:11px;${cellHighlight}">${v === null ? '?' : v}</td>`;
     }
     html += '</tr>';
     return html;
@@ -611,9 +611,9 @@ function renderEllipsis(numCols, label) {
 }
 
 function renderHeader(numCols, label) {
-    let html = '<tr><th style="padding:6px 8px;background:#007bff;color:white; min-width:80px;">' + label + '</th>';
+    let html = '<tr><th style="padding:2px 5px;background:#007bff;color:white; font-size:11px; min-width:50px;">' + label + '</th>';
     for (let c = 0; c < numCols; c++) {
-        html += `<th style="padding:6px 8px;background:#007bff;color:white; width:50px;">${c}</th>`;
+        html += `<th style="padding:2px 4px;background:#007bff;color:white; font-size:11px;">${c}</th>`;
     }
     html += '</tr>';
     return html;
@@ -680,7 +680,8 @@ function renderDefault() {
 
     const sortedDataIndices = Array.from(dataIndicesToShow).sort((a, b) => a - b);
 
-    let html = '<div>';
+    let html = '<div style="display:flex; gap:16px; align-items:flex-start;">';
+    html += '<div style="flex:1; min-width:0;">';
     html += `<div style="font-size:12px; color:#666; margin-bottom:4px;">${allRegNames.length} rows total</div>`;
 
     const maxScroll = Math.max(0, dataRows.length - MAX_DATA_ROWS);
@@ -716,7 +717,12 @@ function renderDefault() {
     for (const reg of computeRows) {
         html += renderRow(reg, numCols);
     }
-    html += '</table></div>';
+    html += '</table>';
+    html += '</div>';  // end cell-tables column
+
+    // Result column (populated by renderResult via #result)
+    html += '<div id="result" style="min-width:180px; flex-shrink:0;"></div>';
+    html += '</div>';  // end flex wrapper
 
     document.getElementById('memory').innerHTML = html;
 }
@@ -881,7 +887,7 @@ function renderResult() {
         : numOperands === 3 ? ['Cond', 'A', 'B']
         : Array.from({length: numOperands}, (_, i) => 'Op' + i);
 
-    let html = `<div style="font-size:12px; color:#666; margin-bottom:6px;">${bitWidth}-bit &middot; ${numLanes} lane(s)</div>`;
+    let html = `<div style="font-size:10px; color:#666; margin-bottom:4px;">${bitWidth}-bit &middot; ${numLanes} lane(s)</div>`;
     html += '<table class="result-table">';
 
     // Header
@@ -936,9 +942,9 @@ function renderResult() {
     if (isDone) {
         const cls = correct ? 'correct' : 'wrong';
         const text = correct ? 'ALL CORRECT' : 'MISMATCH';
-        html += `<div style="margin-top:8px; text-align:right;"><span class="result-status ${cls}" style="font-size:14px; padding:5px 16px;">${text}</span></div>`;
+        html += `<div style="margin-top:6px; text-align:right;"><span class="result-status ${cls}" style="font-size:11px; padding:3px 10px;">${text}</span></div>`;
     } else {
-        html += `<div style="margin-top:8px; text-align:right;"><span class="result-status pending" style="font-size:13px;">Running... (${pc}/${program.instrs.length})</span></div>`;
+        html += `<div style="margin-top:6px; text-align:right;"><span class="result-status pending" style="font-size:10px;">Running... (${pc}/${program.instrs.length})</span></div>`;
     }
 
     document.getElementById('result').innerHTML = html;

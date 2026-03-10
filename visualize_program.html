@@ -10,7 +10,7 @@
         button:disabled { background: #ccc; }
         select, input { padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
         .panel { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-        .memory-array { display: flex; gap: 4px; margin-top: 20px; }
+        .memory-array { margin-top: 20px; }
         .column { display: flex; flex-direction: column; gap: 2px; }
         .cell { padding: 8px 12px; text-align: center; font-family: monospace; background: #f5f5f5; border: 1px solid #ddd; min-width: 60px; }
         .cell.one { background: #d4edda; color: #28a745; }
@@ -51,16 +51,16 @@
         #timingInputs label { white-space: nowrap; }
 
         /* Result table */
-        .result-table { border-collapse: collapse; width: 100%; font-family: monospace; font-size: 13px; }
-        .result-table th { padding: 6px 10px; background: #f8f9fa; border: 1px solid #dee2e6; font-weight: 600; text-align: center; font-size: 11px; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px; }
-        .result-table td { padding: 6px 10px; border: 1px solid #dee2e6; text-align: center; }
-        .result-table .lane-label { background: #e7f3ff; font-weight: bold; width: 50px; }
-        .result-val { padding: 3px 8px; border-radius: 4px; cursor: default; transition: box-shadow 0.15s; display: inline-block; min-width: 28px; }
+        .result-table { border-collapse: collapse; width: 100%; font-family: monospace; font-size: 11px; }
+        .result-table th { padding: 3px 5px; background: #f8f9fa; border: 1px solid #dee2e6; font-weight: 600; text-align: center; font-size: 10px; color: #6c757d; text-transform: uppercase; letter-spacing: 0.3px; }
+        .result-table td { padding: 3px 5px; border: 1px solid #dee2e6; text-align: center; }
+        .result-table .lane-label { background: #e7f3ff; font-weight: bold; width: 30px; }
+        .result-val { padding: 2px 5px; border-radius: 3px; cursor: default; transition: box-shadow 0.15s; display: inline-block; min-width: 20px; }
         .result-val:hover { box-shadow: 0 0 0 2px #007bff; }
         .result-val.val-input { background: #d4edda; color: #155724; }
         .result-val.val-output { background: #cce5ff; color: #004085; }
         .result-val.val-expected { background: #f8f9fa; color: #495057; }
-        .result-status { font-weight: bold; padding: 3px 10px; border-radius: 4px; display: inline-block; font-size: 12px; }
+        .result-status { font-weight: bold; padding: 2px 6px; border-radius: 3px; display: inline-block; font-size: 10px; }
         .result-status.correct { background: #d4edda; color: #155724; }
         .result-status.wrong { background: #f8d7da; color: #721c24; }
         .result-status.pending { background: #fff3cd; color: #856404; }
@@ -117,10 +117,6 @@
                 <h2 id="memoryLabel">Memory Array</h2>
                 <div id="memory" class="memory-array"></div>
             </div>
-        </div>
-        <div class="panel">
-            <h2>Result</h2>
-            <div id="result"></div>
         </div>
     </div>
 
