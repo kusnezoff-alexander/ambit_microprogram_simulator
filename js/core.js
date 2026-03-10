@@ -226,7 +226,6 @@ function generateRandom() {
     }
 
     document.getElementById('inputVal').style.border = '';
-    document.getElementById('loadBtn').disabled = false;
     document.getElementById('stepBtn').disabled = false;
     document.getElementById('runBtn').disabled = false;
 
@@ -315,15 +314,13 @@ function loadProgram() {
 
     // Validate input format for binary operations
     if (isBinaryOp && (!inputStr.startsWith('[[') || !inputStr.endsWith(']]'))) {
-        document.getElementById('inputVal').style.border = '2px solid red';
-        document.getElementById('loadBtn').disabled = true;
+        document.getElementById('inputVal').style.border = '';
         document.getElementById('stepBtn').disabled = true;
         document.getElementById('runBtn').disabled = true;
         return;
     }
 
     document.getElementById('inputVal').style.border = '';
-    document.getElementById('loadBtn').disabled = false;
     document.getElementById('stepBtn').disabled = false;
     document.getElementById('runBtn').disabled = false;
 

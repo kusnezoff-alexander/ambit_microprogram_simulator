@@ -150,7 +150,7 @@ async function testAmbitBackend() {
     // Load abs4 with input 5
     await page.select('#program', 'abs4');
     await page.evaluate(() => { document.getElementById('inputVal').value = '5'; });
-    await page.click('#loadBtn');
+    await page.evaluate(() => loadProgram());
     await page.waitForSelector('#main[style*="block"]', { timeout: 3000 });
 
     // Check main area is visible
@@ -183,7 +183,7 @@ async function testAmbitBackend() {
 
     // Test abs4 with negative value (e.g. 13 = -3 in 4-bit signed)
     await page.evaluate(() => { document.getElementById('inputVal').value = '13'; });
-    await page.click('#loadBtn');
+    await page.evaluate(() => loadProgram());
     await page.click('#runBtn');
     const resultNeg = await page.$eval('#result', el => el.textContent);
     assert(resultNeg.includes('CORRECT'), `abs4(13=-3) is CORRECT: "${resultNeg.substring(0, 150)}"`);
@@ -268,7 +268,7 @@ async function testReRAMAbs() {
 
     // Set multi-lane input: abs([5, 251, 42])
     await page.evaluate(() => { document.getElementById('inputVal').value = '[5, 251, 42]'; });
-    await page.click('#loadBtn');
+    await page.evaluate(() => loadProgram());
     await page.waitForSelector('#main[style*="block"]', { timeout: 3000 });
 
     // Check horizontal table rendered
@@ -375,7 +375,7 @@ async function testReRAMAdder() {
 
     // Test 3 + 5 = 8 (multi-lane)
     await page.evaluate(() => { document.getElementById('inputVal').value = '[[3,10],[5,2]]'; });
-    await page.click('#loadBtn');
+    await page.evaluate(() => loadProgram());
     await page.click('#runBtn');
 
     const resultText = await page.$eval('#result', el => el.textContent);
@@ -383,7 +383,7 @@ async function testReRAMAdder() {
 
     // Test adder with overflow: 247 + 28 = 19 (8-bit wrap)
     await page.evaluate(() => { document.getElementById('inputVal').value = '[[247],[28]]'; });
-    await page.click('#loadBtn');
+    await page.evaluate(() => loadProgram());
     await page.click('#runBtn');
     const overflowResult = await page.$eval('#result', el => el.textContent);
     assert(overflowResult.includes('CORRECT'), `add(247,28)=19 (overflow) CORRECT: "${overflowResult.substring(0, 150)}"`);
@@ -418,7 +418,7 @@ async function testReRAMPopcount() {
     await page.select('#program', pcntName);
     // popcount multi-lane: [179, 255, 0] = [5, 8, 0]
     await page.evaluate(() => { document.getElementById('inputVal').value = '[179, 255, 0]'; });
-    await page.click('#loadBtn');
+    await page.evaluate(() => loadProgram());
     await page.click('#runBtn');
 
     const resultText = await page.$eval('#result', el => el.textContent);
@@ -451,7 +451,7 @@ async function testReRAMSubtractor() {
     await page.select('#program', subName);
     // 10 - 3 = 7, 3 - 5 = -2
     await page.evaluate(() => { document.getElementById('inputVal').value = '[[10,3],[3,5]]'; });
-    await page.click('#loadBtn');
+    await page.evaluate(() => loadProgram());
     await page.click('#runBtn');
 
     const resultText = await page.$eval('#result', el => el.textContent);
@@ -484,7 +484,7 @@ async function testReRAMMultiplier() {
     await page.select('#program', mulName);
     // 3 * 5 = 15, 2 * 7 = 14
     await page.evaluate(() => { document.getElementById('inputVal').value = '[[3,2],[5,7]]'; });
-    await page.click('#loadBtn');
+    await page.evaluate(() => loadProgram());
     await page.click('#runBtn');
 
     const resultText = await page.$eval('#result', el => el.textContent);
@@ -553,7 +553,7 @@ async function testReRAMColumnHighlighting() {
 
     await page.select('#program', absName);
     await page.evaluate(() => { document.getElementById('inputVal').value = '42'; });
-    await page.click('#loadBtn');
+    await page.evaluate(() => loadProgram());
 
     // Step once (past init to first real instruction)
     await page.click('#stepBtn');
