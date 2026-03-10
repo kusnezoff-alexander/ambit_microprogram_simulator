@@ -325,7 +325,7 @@ const ReRAMBackend = {
         html += '<tr>';
         html += '<th style="padding:4px 8px; background:#007bff; color:white; font-size:11px; position:sticky; left:0; z-index:2; min-width:40px; vertical-align:bottom;">Row</th>';
         for (let c = 0; c < rowSize; c++) {
-            let thBg = '#007bff';
+            let thBg = '#adb5bd';
             if (inputCells.has(c)) thBg = '#28a745';
             else if (outputCells.has(c)) thBg = '#dc3545';
             const name = cellNames[c] || '';
@@ -359,7 +359,7 @@ const ReRAMBackend = {
                 }
 
                 const display = v === null ? '?' : v;
-                html += `<td style="padding:3px 4px; background:${bg}; color:${color}; text-align:center; font-family:monospace; font-size:11px; ${extra}">${display}</td>`;
+                html += `<td data-row="${rn}" data-col="${c}" style="padding:3px 4px; background:${bg}; color:${color}; text-align:center; font-family:monospace; font-size:11px; ${extra}">${display}</td>`;
             }
             html += '</tr>';
         }
@@ -371,6 +371,7 @@ const ReRAMBackend = {
         html += '<div style="margin-top:8px; font-size:11px; color:#666; display:flex; gap:14px; flex-wrap:wrap;">';
         html += '<span><span style="display:inline-block;width:12px;height:12px;background:#28a745;border:1px solid #ccc;vertical-align:middle;margin-right:4px;"></span>Input</span>';
         html += '<span><span style="display:inline-block;width:12px;height:12px;background:#dc3545;border:1px solid #ccc;vertical-align:middle;margin-right:4px;"></span>Output</span>';
+        html += '<span><span style="display:inline-block;width:12px;height:12px;background:#adb5bd;border:1px solid #ccc;vertical-align:middle;margin-right:4px;"></span>Scratch</span>';
         html += '<span><span style="display:inline-block;width:12px;height:12px;background:#ffc107;border:1px solid #ccc;vertical-align:middle;margin-right:4px;"></span>Active</span>';
         html += '<span><span style="display:inline-block;width:12px;height:12px;background:#17a2b8;border:1px solid #ccc;vertical-align:middle;margin-right:4px;"></span>Previous</span>';
         html += '</div>';

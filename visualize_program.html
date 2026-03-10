@@ -49,6 +49,29 @@
         /* Timing inputs row */
         #timingInputs { display: flex; gap: 15px; align-items: center; font-size: 13px; }
         #timingInputs label { white-space: nowrap; }
+
+        /* Result table */
+        .result-table { border-collapse: collapse; width: 100%; font-family: monospace; font-size: 13px; }
+        .result-table th { padding: 6px 10px; background: #f8f9fa; border: 1px solid #dee2e6; font-weight: 600; text-align: center; font-size: 11px; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px; }
+        .result-table td { padding: 6px 10px; border: 1px solid #dee2e6; text-align: center; }
+        .result-table .lane-label { background: #e7f3ff; font-weight: bold; width: 50px; }
+        .result-val { padding: 3px 8px; border-radius: 4px; cursor: default; transition: box-shadow 0.15s; display: inline-block; min-width: 28px; }
+        .result-val:hover { box-shadow: 0 0 0 2px #007bff; }
+        .result-val.val-input { background: #d4edda; color: #155724; }
+        .result-val.val-output { background: #cce5ff; color: #004085; }
+        .result-val.val-expected { background: #f8f9fa; color: #495057; }
+        .result-status { font-weight: bold; padding: 3px 10px; border-radius: 4px; display: inline-block; font-size: 12px; }
+        .result-status.correct { background: #d4edda; color: #155724; }
+        .result-status.wrong { background: #f8d7da; color: #721c24; }
+        .result-status.pending { background: #fff3cd; color: #856404; }
+
+        /* Hover highlight on memory cells */
+        td[data-row][data-col].hover-highlight {
+            outline: 3px solid #007bff !important;
+            outline-offset: -2px;
+            z-index: 5;
+            position: relative;
+        }
     </style>
 </head>
 <body>
@@ -67,7 +90,7 @@
             </div>
             <div>
                 <label>Input (decimal, hex, or array for multi-operand):</label><br>
-                <input type="text" id="inputVal" value="5" placeholder="e.g. 5 for abs, [5,3] for add">
+                <input type="text" id="inputVal" value="" placeholder="e.g. 5 for abs, [5,3] for add">
             </div>
             <button id="loadBtn" onclick="loadProgram()">Load</button>
             <button id="randomBtn" onclick="generateRandom()">Random</button>

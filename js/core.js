@@ -600,7 +600,7 @@ function renderRow(reg, numCols) {
             }
         }
 
-        html += `<td style="padding:6px 8px;background:${bg};color:${color};text-align:center; font-family:monospace;${cellHighlight}">${v === null ? '?' : v}</td>`;
+        html += `<td data-row="${reg}" data-col="${c}" style="padding:6px 8px;background:${bg};color:${color};text-align:center; font-family:monospace;${cellHighlight}">${v === null ? '?' : v}</td>`;
     }
     html += '</tr>';
     return html;
@@ -796,17 +796,13 @@ function renderResult() {
 
     // Reconstruct output values
     let outputVals;
+    const outputRowNames = Object.keys(registers)
+        .filter(r => r.startsWith('O'))
+        .sort((a, b) => parseInt(a.slice(1)) - parseInt(b.slice(1)));
     if (activeBackend.reconstructOutput) {
-        // Backend handles reconstruction (e.g. ReRAM reads specific cell positions)
-        const outputRowNames = Object.keys(registers)
-            .filter(r => r.startsWith('O'))
-            .sort((a, b) => parseInt(a.slice(1)) - parseInt(b.slice(1)));
         outputVals = activeBackend.reconstructOutput(registers, outputRowNames, numCols, bitWidth);
     } else {
         // Default: Ambit-style vertical reconstruction from O* registers
-        const outputRowNames = Object.keys(registers)
-            .filter(r => r.startsWith('O'))
-            .sort((a, b) => parseInt(a.slice(1)) - parseInt(b.slice(1)));
         const numOutputBits = outputRowNames.length;
         outputVals = [];
         for (let col = 0; col < numCols; col++) {
@@ -824,30 +820,32 @@ function renderResult() {
     }
 
     const inputData = parseInput(document.getElementById('inputVal').value);
-    let inputArray, inputDisplay;
+    let inputPerLane;   // array of per-lane input info: [{values: [opA, opB, ...]}]
+    let isBinaryInput = false;
 
     if (typeof inputData === 'object' && inputData !== null && 'isNested' in inputData) {
-        const operands = inputData.operands;
-        const numCols2 = operands.length > 0 ? operands[0].length : 1;
-        inputArray = [];
-        for (let c = 0; c < numCols2; c++) {
-            let val = 0;
-            for (const op of operands) val += op[c] || 0;
-            inputArray.push(val);
+        const operands = inputData.operands;  // [[opA_lane0, opA_lane1, ...], [opB_lane0, ...]]
+        const numLanes = operands.length > 0 ? operands[0].length : 1;
+        isBinaryInput = true;
+        inputPerLane = [];
+        for (let c = 0; c < numLanes; c++) {
+            const vals = operands.map(op => op[c] || 0);
+            inputPerLane.push({ values: vals });
         }
-        inputDisplay = document.getElementById('inputVal').value;
     } else if (Array.isArray(inputData)) {
-        inputArray = inputData;
-        inputDisplay = '[' + inputData.join(',') + ']';
+        inputPerLane = inputData.map(v => ({ values: [v] }));
     } else {
-        inputArray = [inputData];
-        inputDisplay = inputData;
+        inputPerLane = [{ values: [inputData] }];
     }
 
+    // For expected-value computation, flatten to simple inputArray
+    const inputArray = inputPerLane.map(lane => {
+        return lane.values.length === 1 ? lane.values[0] : lane.values.reduce((a, b) => a + b, 0);
+    });
+
     const numOutputVals = outputVals.length;
-    const numInputs = inputArray.length;
-    // For backends with different #outputs vs #inputs, show all outputs
-    const displayOutputs = numOutputVals > 0 ? outputVals : outputVals.slice(0, numInputs);
+    const numLanes = Math.max(inputPerLane.length, numOutputVals);
+    const displayOutputs = numOutputVals > 0 ? outputVals : [];
 
     // Detect signed output for sub
     const isSub = progName && (progName.startsWith('sub') || progName.toLowerCase().includes('subtractor'));
@@ -868,24 +866,141 @@ function renderResult() {
     const isDone = pc >= program.instrs.length;
 
     if (isDone) {
-        // Detect operation from program name or benchmark
         const opName = program.benchmark || progName || '';
-        const result = computeExpected(opName, inputArray, displayOutputs, numInputs);
+        const result = computeExpected(opName, inputArray, displayOutputs, inputPerLane.length);
         expected = result.expected;
         correct = result.correct;
     }
 
-    let resultHtml = `Input: ${inputDisplay} (${bitWidth}-bit)<br>`;
-    resultHtml += `Output: [${outputDisplay.join(', ')}]<br>`;
+    // --- Build the result table ---
+    const isReRAM = activeBackend.name === 'ReRAM';
+    const laneLabel = isReRAM ? 'Row' : 'Col';
+    const numOperands = inputPerLane.length > 0 ? inputPerLane[0].values.length : 1;
+    const operandLabels = numOperands === 1 ? ['Input']
+        : numOperands === 2 ? ['A', 'B']
+        : numOperands === 3 ? ['Cond', 'A', 'B']
+        : Array.from({length: numOperands}, (_, i) => 'Op' + i);
+
+    let html = `<div style="font-size:12px; color:#666; margin-bottom:6px;">${bitWidth}-bit &middot; ${numLanes} lane(s)</div>`;
+    html += '<table class="result-table">';
+
+    // Header
+    html += '<tr>';
+    html += `<th>${laneLabel}</th>`;
+    for (const lbl of operandLabels) html += `<th>${lbl}</th>`;
+    html += '<th>Output</th>';
+    if (isDone) html += '<th>Expected</th><th>Status</th>';
+    html += '</tr>';
+
+    // Per-lane rows
+    for (let i = 0; i < numLanes; i++) {
+        const laneId = isReRAM ? 'R' + i : i;
+        html += '<tr>';
+        html += `<td class="lane-label">${laneId}</td>`;
+
+        // Input operands
+        const laneInput = inputPerLane[i] || { values: [] };
+        for (let op = 0; op < numOperands; op++) {
+            const val = laneInput.values[op];
+            const display = val !== undefined ? val : '?';
+            html += `<td><span class="result-val val-input" data-hover-type="input" data-hover-lane="${i}" data-hover-op="${op}" `
+                + `onmouseenter="highlightBits(this)" onmouseleave="clearHighlightBits()">${display}</span></td>`;
+        }
+
+        // Output
+        const outVal = outputDisplay[i] !== undefined ? outputDisplay[i] : '?';
+        html += `<td><span class="result-val val-output" data-hover-type="output" data-hover-lane="${i}" `
+            + `onmouseenter="highlightBits(this)" onmouseleave="clearHighlightBits()">${outVal}</span></td>`;
+
+        // Expected + status
+        if (isDone) {
+            const hasExpected = Array.isArray(expected) && i < expected.length;
+            const expVal = hasExpected ? expected[i] : '\u2014';
+            html += `<td><span class="result-val val-expected">${expVal}</span></td>`;
+            if (hasExpected) {
+                const laneCorrect = outputDisplay[i] === expected[i];
+                const statusCls = laneCorrect ? 'correct' : 'wrong';
+                const statusText = laneCorrect ? 'OK' : 'WRONG';
+                html += `<td><span class="result-status ${statusCls}">${statusText}</span></td>`;
+            } else {
+                html += `<td><span style="color:#999;">\u2014</span></td>`;
+            }
+        }
+
+        html += '</tr>';
+    }
+
+    html += '</table>';
+
+    // Overall status bar
     if (isDone) {
-        resultHtml += `Expected: [${Array.isArray(expected) ? expected.join(', ') : expected}]`;
-        if (correct) {
-            resultHtml += '<br><span style="color:green;font-weight:bold;">CORRECT</span>';
-        } else {
-            resultHtml += '<br><span style="color:red;font-weight:bold;">WRONG</span>';
+        const cls = correct ? 'correct' : 'wrong';
+        const text = correct ? 'ALL CORRECT' : 'MISMATCH';
+        html += `<div style="margin-top:8px; text-align:right;"><span class="result-status ${cls}" style="font-size:14px; padding:5px 16px;">${text}</span></div>`;
+    } else {
+        html += `<div style="margin-top:8px; text-align:right;"><span class="result-status pending" style="font-size:13px;">Running... (${pc}/${program.instrs.length})</span></div>`;
+    }
+
+    document.getElementById('result').innerHTML = html;
+}
+
+// ============================================================
+// Hover Highlight — map result values to memory cells
+// ============================================================
+
+function highlightBits(el) {
+    const hoverType = el.getAttribute('data-hover-type');  // 'input' or 'output'
+    const lane = parseInt(el.getAttribute('data-hover-lane'));
+    const op = parseInt(el.getAttribute('data-hover-op') || '0');
+    const isReRAM = activeBackend.name === 'ReRAM';
+
+    const cellsToHighlight = [];
+
+    if (isReRAM) {
+        const rowName = 'R' + lane;
+        if (hoverType === 'output' && program.outputMap) {
+            // Highlight output cell positions in this row
+            for (const sig of program.outputMap) {
+                const m = sig.name.match(/^[A-Za-z]+(\d+)$/);
+                if (m) cellsToHighlight.push({ row: rowName, col: sig.cell });
+            }
+        } else if (hoverType === 'input' && program.inputMap) {
+            // Find cells for the specific operand
+            let currentPrefix = null;
+            let opIdx = 0;
+            for (const inp of program.inputMap) {
+                const prefix = inp.name.replace(/\d+$/, '');
+                if (currentPrefix !== null && prefix !== currentPrefix) opIdx++;
+                currentPrefix = prefix;
+                if (opIdx === op) cellsToHighlight.push({ row: rowName, col: inp.cell });
+            }
+        }
+    } else {
+        // Ambit: vertical layout — column = lane, rows = bit positions
+        const col = lane;
+        if (hoverType === 'output') {
+            const oRows = Object.keys(registers).filter(r => r.startsWith('O')).sort((a, b) => parseInt(a.slice(1)) - parseInt(b.slice(1)));
+            for (const r of oRows) cellsToHighlight.push({ row: r, col });
+        } else if (hoverType === 'input') {
+            // For binary ops, operand 0 = I0..I{bw-1}, operand 1 = I{bw}..I{2*bw-1}
+            const iRows = Object.keys(registers).filter(r => r.startsWith('I')).sort((a, b) => parseInt(a.slice(1)) - parseInt(b.slice(1)));
+            const start = op * bitWidth;
+            const end = start + bitWidth;
+            for (let idx = start; idx < end && idx < iRows.length; idx++) {
+                cellsToHighlight.push({ row: iRows[idx], col });
+            }
         }
     }
-    document.getElementById('result').innerHTML = resultHtml;
+
+    // Apply highlight class to matching cells
+    for (const { row, col } of cellsToHighlight) {
+        const cell = document.querySelector(`td[data-row="${row}"][data-col="${col}"]`);
+        if (cell) cell.classList.add('hover-highlight');
+    }
+}
+
+function clearHighlightBits() {
+    document.querySelectorAll('.hover-highlight').forEach(el => el.classList.remove('hover-highlight'));
 }
 
 // Compute expected values for known operations
@@ -965,7 +1080,11 @@ function computeExpected(progName, inputArray, displayOutputs, numInputs) {
                 const b = operands[1] ? (operands[1][c] || 0) : 0;
                 switch (op) {
                     case '+': val = (a + b) & mask; break;
-                    case '*': val = (a * b) & mask; break;
+                    case '*': {
+                        const mulMask = bitWidth >= 16 ? 0xFFFFFFFF : ((1 << (2 * bitWidth)) - 1);
+                        val = (a * b) & mulMask;
+                        break;
+                    }
                     case 'min': val = Math.min(a, b); break;
                     case 'max': val = Math.max(a, b); break;
                     case '>': val = a > b ? 1 : 0; break;
