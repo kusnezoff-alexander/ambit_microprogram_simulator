@@ -737,7 +737,7 @@ function renderDefault() {
     html += '</div>';  // end cell-tables column
 
     // Result column (populated by renderResult via #result)
-    html += '<div id="result" style="min-width:180px; flex-shrink:0;"></div>';
+    html += '<div id="result" style="width:220px; flex-shrink:0;"></div>';
     html += '</div>';  // end flex wrapper
 
     document.getElementById('memory').innerHTML = html;
